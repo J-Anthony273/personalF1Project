@@ -250,12 +250,18 @@ def championshipProgression(season, system):
         drivers = {}
         driversResults = {}
         driver_points_progression = {}
+        
+        # Store a reference session for styling (use the last race of the season)
+        reference_session = None
 
         scoring = dict(scoringSystems)[int(system)]
 
         for raceNo in range(1, noOfRaces[int(season)] + 1):
             session = fastf1.get_session(int(season), raceNo, 'R')
             session.load()
+            
+            # Store the last valid session for styling reference
+            reference_session = session
 
             results = session.results.loc[:, ['Abbreviation', 'FirstName', 'LastName', 'ClassifiedPosition']].copy()
             results['DriverName'] = results['FirstName'] + ' ' + results['LastName']
@@ -263,6 +269,7 @@ def championshipProgression(season, system):
             fastest_lap = session.laps.pick_fastest()
             fastest_driver = fastest_lap['Driver'] if fastest_lap is not None else None
             results['GotFastestLap'] = results['Abbreviation'] == fastest_driver
+            
             for _, row in results.iterrows():
                 abb = row['Abbreviation']
                 driver_name = row['DriverName']
@@ -273,6 +280,7 @@ def championshipProgression(season, system):
                     drivers[driver_name] = 0
                     driversResults[driver_name] = []
                     driver_points_progression[abb] = []
+                    
                 points = scoring.get(pos, 0)
                 flRule = scoring.get("FL", False)
                 if flRule:
@@ -282,6 +290,7 @@ def championshipProgression(season, system):
                     elif isinstance(flRule, int):
                         if gotFL and int(pos) <= int(flRule):
                             points += 1
+                            
                 driversResults[driver_name].append(points)
                 countedRaces = scoring.get("Counted")
                 if isinstance(countedRaces, int):
@@ -289,19 +298,38 @@ def championshipProgression(season, system):
                     drivers[driver_name] = sum(driversResults[driver_name][:countedRaces])
                 else:
                     drivers[driver_name] += points
+                    
                 driver_points_progression[abb].append(drivers[driver_name])
+
         final_points_dict = {
             abb: totals[-1] for abb, totals in driver_points_progression.items()
         }
         sorted_drivers = sorted(final_points_dict.items(), key=lambda x: x[1], reverse=True)
+
+        # Define fallback colors for drivers that might cause issues
+        fallback_colors = plt.cm.tab20(np.linspace(0, 1, 20))
+        color_index = 0
 
         for abb, _ in sorted_drivers:
             totals = driver_points_progression[abb]
             final_points = totals[-1]
             label = f"{abb}-{final_points}"
 
-            style = fastf1.plotting.get_driver_style(identifier=abb, style=['color', 'linestyle'], session=session)
-            ax.plot(range(1, len(totals)+1), totals, label=label, **style)
+            try:
+                # Try to get the official FastF1 style
+                style = fastf1.plotting.get_driver_style(
+                    identifier=abb, 
+                    style=['color', 'linestyle'], 
+                    session=reference_session
+                )
+                ax.plot(range(1, len(totals)+1), totals, label=label, **style)
+            except Exception as style_error:
+                # If styling fails, use fallback color
+                print(f"Warning: Could not get style for driver {abb}: {style_error}")
+                fallback_color = fallback_colors[color_index % len(fallback_colors)]
+                ax.plot(range(1, len(totals)+1), totals, label=label, 
+                       color=fallback_color, linewidth=2)
+                color_index += 1
 
         ax.set_xlabel('Race Number')
         ax.set_ylabel('Championship Points')
