@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+
+<html lang = "en">
+
+</html>
+<head>
+    <meta charset="UTF-8" />
+    <title>F1 Plotter</title>
+</head>
+<body>
+    <div class="container">
+        <h1>Select Plot Options</h1>
+        <form method="POST">
+            {{ form.hidden_tag() }}
+
+            <div>
+            Graph Type<br>
+            {{ form.graphType }}
+            </div>
+            <div>
+            Season<br>
+            {{ form.season }}
+            </div>
+            <div>
+            <span id="racesLabel">Races</span><br>
+            {{ form.races }}
+            </div>
+
+            {{ form.submit(id="submitButton", disabled="disabled") }}
+        </form>
+
+        {% if img_url %}
+            <hr>
+            <h2>Generated Plot:</h2>
+            <img src="{{ img_url }}" alt="Plot Image" style="max-width: 100%; height: auto;">
+        {% endif %}
+    </div>
+
+    <script>
+        const selects = document.querySelectorAll('select');
+        const graphTypeSelect = document.querySelector('select[name="graphType"]');
+        const seasonSelect = document.querySelector('select[name="season"]');
+        const raceSelect = document.querySelector('select[name="races"]');
+        const submitButton = document.getElementById('submitButton');
+        const racesLabel = document.getElementById('racesLabel');
+
+        function checkAllSelected(){
+            let allFilled = Array.from(selects).every(s => s.value);
+            submitButton.disabled = !allFilled;
+        }
+
+        function updateRaceOptions() {
+            const graphType = graphTypeSelect.value;
+            const seasonValue = seasonSelect.value;
+
+            if (seasonValue) {
+                let endpoint = '/get_races';
+                let label = 'Races';
+                
+                if (graphType === 'qualifyingAverages' || graphType === 'singleQualifyingAverages') {
+                    endpoint = '/get_pairings';
+                    label = 'Driver Pairings';
+                } else if (graphType === 'championshipProgressionGraph') {
+                    endpoint = '/get_systems';
+                    label = 'Scoring Systems';
+                }
+
+                racesLabel.textContent = label;
+
+                fetch(endpoint, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ season: seasonValue})
+                })
+                .then(response => response.json())
+                .then(data => {
+                    raceSelect.innerHTML = '';
+
+                    data.forEach(opt => {
+                        const option = document.createElement('option');
+                        option.value = opt[0];
+                        option.textContent = opt[1];
+                        raceSelect.append(option);
+                    });
+                    raceSelect.value = '';
+                    checkAllSelected();
+                });
+            } else {
+                let defaultLabel = '--Race--';
+                if (graphType === 'qualifyingAverages' || graphType === 'singleQualifyingAverages') {
+                    defaultLabel = '--Driver Pairings--';
+                    label = 'Driver Pairings';
+                } else if (graphType === 'championshipProgressionGraph') {
+                    defaultLabel = '--Scoring Systems--';
+                    label = 'Scoring Systems';
+                } else {
+                    label = 'Races';
+                }
+                
+                raceSelect.innerHTML = `<option value="">${defaultLabel}</option>`;
+                racesLabel.textContent = label;
+                checkAllSelected();
+            }
+        }
+
+        checkAllSelected();
+
+        selects.forEach(select => select.addEventListener('change', checkAllSelected));
+
+        graphTypeSelect.addEventListener('change', function() {
+            updateRaceOptions();
+        });
+
+        seasonSelect.addEventListener('change', function() {
+            updateRaceOptions();
+        });
+    </script>
+</body></document_content>
