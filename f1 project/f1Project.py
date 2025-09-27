@@ -251,11 +251,12 @@ def championshipProgression(season, system, sprintsystem = None):
         matplotlib.use("Agg") 
         noOfRaces = {2018 : 21, 2019 : 21, 2020 : 17, 2021 : 22, 2022 : 19, 2023 : 22, 2024 : 24, 2025 : 14}
         fastf1.plotting.setup_mpl(mpl_timedelta_support=False, misc_mpl_mods=False, color_scheme='fastf1')
-        fig, ax = plt.subplots(figsize=(12.0, 4.9))
+        fig, ax = plt.subplots(figsize=(16.0, 8.0))
 
         drivers = {}
         driversResults = {}
         driver_points_progression = {}
+        driversRacesRaced = {}
         reference_session = None
 
         scoring = dict(scoringSystems)[int(system)]
@@ -338,6 +339,12 @@ def championshipProgression(season, system, sprintsystem = None):
                     
                 driver_points_progression[abb].append(drivers[driver_name])
 
+                if abb in driversRacesRaced:
+                    driversRacesRaced[abb].append(raceNo)
+                else:
+                    driversRacesRaced[abb] = []
+                    driversRacesRaced[abb].append(raceNo)
+
         final_points_dict = {
             abb: totals[-1] for abb, totals in driver_points_progression.items()
         }
@@ -347,6 +354,7 @@ def championshipProgression(season, system, sprintsystem = None):
 
         for abb, _ in sorted_drivers:
             totals = driver_points_progression[abb]
+            races_participated = driversRacesRaced[abb]
             final_points = totals[-1]
             label = f"{abb}-{final_points}"
 
@@ -356,16 +364,18 @@ def championshipProgression(season, system, sprintsystem = None):
                     style=['color', 'linestyle'], 
                     session=reference_session
                 )
-                ax.plot(range(1, len(totals)+1), totals, label=label, **style)
+                ax.plot(races_participated, totals, label=label, **style)
             except Exception as style_error:
                 print(f"Warning: Could not get style for driver {abb}: {style_error}")
                 fallback_color = fallback_colors[color_index % len(fallback_colors)]
-                ax.plot(range(1, len(totals)+1), totals, label=label, 
-                       color=fallback_color, linewidth=2)
+                ax.plot(races_participated, totals, label=label, color=fallback_color, linewidth=2)
                 color_index += 1
 
         ax.set_xlabel('Race Number')
         ax.set_ylabel('Championship Points')
+        
+        ax.set_xticks(range(1, noOfRaces[int(season)] + 1))
+        ax.grid(True, alpha=0.3)
         systems = dict(scoringMapping)
         sprint_text = ""
         if sprintsystem and sprint_scoring:
