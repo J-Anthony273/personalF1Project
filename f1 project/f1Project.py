@@ -1,3 +1,4 @@
+
 import fastf1
 import matplotlib
 import matplotlib.pyplot as plt
@@ -19,6 +20,7 @@ import pandas as pd
 from seasonMapping import seasonMapping
 from scoringSystems import scoringSystems, sprintScoringSystems
 from scoringMapping import scoringMapping, sprintScoringMapping
+from collections import defaultdict
 
 
 app = Flask(__name__)
@@ -257,6 +259,7 @@ def championshipProgression(season, system, sprintsystem = None):
         driversResults = {}
         driver_points_progression = {}
         driversRacesRaced = {}
+        driversPositions = {}
         reference_session = None
 
         scoring = dict(scoringSystems)[int(system)]
@@ -317,8 +320,13 @@ def championshipProgression(season, system, sprintsystem = None):
                 if driver_name not in drivers:
                     drivers[driver_name] = 0
                     driversResults[driver_name] = []
+                    driversPositions[driver_name] = {}
                     driver_points_progression[abb] = []
-                    
+
+                if pos not in driversPositions[driver_name]:
+                    driversPositions[driver_name][pos] = 1
+                
+                driversPositions[driver_name][pos] += 1
                 points = scoring.get(pos, 0)
                 flRule = scoring.get("FL", False)
                 if flRule:
@@ -351,6 +359,44 @@ def championshipProgression(season, system, sprintsystem = None):
         sorted_drivers = sorted(final_points_dict.items(), key=lambda x: x[1], reverse=True)
         fallback_colors = plt.cm.tab20(np.linspace(0, 1, 20))
         color_index = 0
+
+        abb_to_name = {}
+        for abb, totals in driver_points_progression.items():
+            for name in drivers.keys():
+                # Match by checking if this driver has data
+                if name not in abb_to_name.values():
+                    abb_to_name[abb] = name
+                    break
+
+        final_sorted_drivers = []
+        i = 0
+        while i < len(sorted_drivers):
+            current_points = sorted_drivers[i][1]
+            tied_drivers = [sorted_drivers[i]]
+
+            j = i + 1
+            while j < len(sorted_drivers) and sorted_drivers[j][1] == current_points:
+                tied_drivers.append(sorted_drivers[j])
+                j += 1
+
+            if len(tied_drivers) > 1:
+                def get_countback_key(driver_tuple):
+                    abb = driver_tuple[0]
+                    driver_name = abb_to_name.get(abb)
+                    if driver_name and driver_name in driversPositions:
+                        countback = []
+                        for pos in range(1, 21):
+                            count = driversPositions[driver_name].get(pos, 0)
+                            countback.append(-count)
+                        return tuple(countback)
+                    return tuple([0] * 20)
+                
+                tied_drivers.sort(key=lambda x: (get_countback_key(x), x[0]))
+
+            final_sorted_drivers.extend(tied_drivers)
+            i = j
+
+        sorted_drivers = final_sorted_drivers
 
         for abb, _ in sorted_drivers:
             totals = driver_points_progression[abb]
