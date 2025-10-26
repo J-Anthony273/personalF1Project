@@ -203,6 +203,10 @@ raceMapping = {
         ("11", "Austrian Grand Prix"),
         ("12", "British Grand Prix"),
         ("13S", "Belgian Sprint Race"),
-        ("13", "Belgian Grand Prix")
+        ("13", "Belgian Grand Prix"),
+        ("14", "Hungarian Grand Prix"),
+        ("15", "Dutch Grand Prix"),
+        ("16", "Italian Grand Prix"),
+        ("17", "Azerbaijan Grand Prix")
     ]
 }
