@@ -52,6 +52,12 @@ class optionForm(FlaskForm):
         ("", "--Race--")
     ], validators = [DataRequired()])
 
+    sprintScoring = SelectField("sprintScoring", choices = [
+        ("", "--Sprint Scoring System--"),
+        ("1", "Sprint Scoring System Used in 2021"),
+        ("2", "Sprint Scoring System Used in 2022 - 2025")
+    ])
+
     submit = SubmitField("Submit")
 
 def to_seconds(t):
@@ -240,7 +246,7 @@ def qualifyingAverages(season, pairing):
         ax.set_title('Error generating plot')
         return fig 
 
-def championshipProgression(season, system):
+def championshipProgression(season, system, sprintsystem = None):
     try:
         matplotlib.use("Agg") 
         noOfRaces = {2018 : 21, 2019 : 21, 2020 : 17, 2021 : 22, 2022 : 19, 2023 : 22, 2024 : 24, 2025 : 14}
@@ -250,17 +256,48 @@ def championshipProgression(season, system):
         drivers = {}
         driversResults = {}
         driver_points_progression = {}
-        
-        # Store a reference session for styling (use the last race of the season)
         reference_session = None
 
         scoring = dict(scoringSystems)[int(system)]
 
+        sprint_scoring = None
+        if sprintsystem:
+            sprint_system_id = int(sprintsystem)
+            if sprint_system_id == 1:
+                sprint_scoring = {"1": 3, "2": 2, "3": 1}
+            elif sprint_system_id == 2:
+                sprint_scoring = {"1": 8, "2": 7, "3": 6, "4": 5, "5": 4, "6": 3, "7": 2, "8": 1}
+
+
         for raceNo in range(1, noOfRaces[int(season)] + 1):
+            event = fastf1.get_event(int(season), int(raceNo))
+            if event["EventFormat"] == "sprint_qualifying" and sprint_scoring:
+                if int(season) == 2021:
+                    session = fastf1.get_session(int(season), raceNo, 'SQ')
+                else:
+                    session = fastf1.get_session(int(season), raceNo, 'S')
+                session.load()
+                results = session.results.loc[:, ['Abbreviation', 'FirstName', 'LastName', 'ClassifiedPosition']].copy()
+                results['DriverName'] = results['FirstName'] + ' ' + results['LastName']
+                for _, row in results.iterrows():
+                    abb = row['Abbreviation']
+                    driver_name = row['DriverName']
+                    pos = row['ClassifiedPosition']
+
+                    if driver_name not in drivers:
+                        drivers[driver_name] = 0
+                        driversResults[driver_name] = []
+                        driver_points_progression[abb] = []
+                        
+                    points = sprint_scoring.get(str(pos), 0)
+                    if driver_name not in driversResults:
+                        driversResults[driver_name] = []
+                    driversResults[driver_name].append(points)
+                    drivers[driver_name] += points
+
+                
             session = fastf1.get_session(int(season), raceNo, 'R')
             session.load()
-            
-            # Store the last valid session for styling reference
             reference_session = session
 
             results = session.results.loc[:, ['Abbreviation', 'FirstName', 'LastName', 'ClassifiedPosition']].copy()
@@ -305,8 +342,6 @@ def championshipProgression(season, system):
             abb: totals[-1] for abb, totals in driver_points_progression.items()
         }
         sorted_drivers = sorted(final_points_dict.items(), key=lambda x: x[1], reverse=True)
-
-        # Define fallback colors for drivers that might cause issues
         fallback_colors = plt.cm.tab20(np.linspace(0, 1, 20))
         color_index = 0
 
@@ -316,7 +351,6 @@ def championshipProgression(season, system):
             label = f"{abb}-{final_points}"
 
             try:
-                # Try to get the official FastF1 style
                 style = fastf1.plotting.get_driver_style(
                     identifier=abb, 
                     style=['color', 'linestyle'], 
@@ -324,7 +358,6 @@ def championshipProgression(season, system):
                 )
                 ax.plot(range(1, len(totals)+1), totals, label=label, **style)
             except Exception as style_error:
-                # If styling fails, use fallback color
                 print(f"Warning: Could not get style for driver {abb}: {style_error}")
                 fallback_color = fallback_colors[color_index % len(fallback_colors)]
                 ax.plot(range(1, len(totals)+1), totals, label=label, 
@@ -334,7 +367,11 @@ def championshipProgression(season, system):
         ax.set_xlabel('Race Number')
         ax.set_ylabel('Championship Points')
         systems = dict(scoringMapping)
-        ax.set_title(f"Championship progression for the {season} season using the {systems[int(system)]}.")
+        sprint_text = ""
+        if sprintsystem and sprint_scoring:
+            sprint_systems = dict(sprintScoringMapping)
+            sprint_text = f" with {sprint_systems[int(sprintsystem)]}"
+        ax.set_title(f"Championship progression for the {season} season using the {systems[int(system)]}{sprint_text}.")
 
         handles, labels = ax.get_legend_handles_labels()
         handles_labels = list(zip(labels, handles))
@@ -503,7 +540,7 @@ def homePage():
             race_choices.insert(0, ("", "--Driver Pairings--"))
 
         elif graph_type == "championshipProgressionGraph":
-            race_choices = list(scoringMapping)  # Convert to list to make a copy
+            race_choices = list(scoringMapping)
             race_choices.insert(0, ("", "--Scoring Systems--"))
 
         else:
@@ -520,8 +557,9 @@ def homePage():
         graphType = form.graphType.data
         season = form.season.data
         race = form.races.data
+        sprintScoring = form.sprintScoring.data if graphType == "championshipProgressionGraph" else None
 
-        img_url = url_for("plot_png", graphType=graphType, season=season, race=race)
+        img_url = url_for("plot_png", graphType=graphType, season=season, race=race, sprintScoring=sprintScoring)
     
     return render_template("index.html", form=form, img_url=img_url)
 
@@ -550,6 +588,7 @@ def plot_png():
     graphType = request.args.get("graphType")
     season = request.args.get("season")
     race = request.args.get("race")
+    sprintScoring = request.args.get("sprintScoring")
     
     if graphType == "positionChanges":
         try:
@@ -609,7 +648,7 @@ def plot_png():
         
     elif graphType == "championshipProgressionGraph":
         try:
-            fig = championshipProgression(season, race)
+            fig = championshipProgression(season, race, sprintScoring)
             buf = io.BytesIO()
             fig.savefig(buf, format="png", bbox_inches='tight')
             buf.seek(0)

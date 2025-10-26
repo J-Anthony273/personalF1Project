@@ -25,6 +25,10 @@
             <span id="racesLabel">Races</span><br>
             {{ form.races }}
             </div>
+            <div id="sprintScoringDiv" style="display: none;">
+            Sprint Scoring System<br>
+            {{ form.sprintScoring }}
+            </div>
 
             {{ form.submit(id="submitButton", disabled="disabled") }}
         </form>
@@ -41,17 +45,43 @@
         const graphTypeSelect = document.querySelector('select[name="graphType"]');
         const seasonSelect = document.querySelector('select[name="season"]');
         const raceSelect = document.querySelector('select[name="races"]');
+        const sprintScoringSelect = document.querySelector('select[name="sprintScoring"]');
         const submitButton = document.getElementById('submitButton');
         const racesLabel = document.getElementById('racesLabel');
+        const sprintScoringDiv = document.getElementById('sprintScoringDiv');
+
+        function resetForm() {
+            graphTypeSelect.value = '';
+            seasonSelect.value = '';
+            raceSelect.innerHTML = '<option value="">--Race--</option>';
+            sprintScoringSelect.value = '';
+            racesLabel.textContent = 'Races';
+            sprintScoringDiv.style.display = 'none';
+            checkAllSelected();
+        }
 
         function checkAllSelected(){
-            let allFilled = Array.from(selects).every(s => s.value);
+            const graphType = graphTypeSelect.value;
+            let requiredSelects = [graphTypeSelect, seasonSelect, raceSelect];
+
+            if (graphType === 'championshipProgressionGraph') {
+                requiredSelects.push(sprintScoringSelect);
+            }
+            
+            let allFilled = requiredSelects.every(s => s.value);
             submitButton.disabled = !allFilled;
         }
 
         function updateRaceOptions() {
             const graphType = graphTypeSelect.value;
             const seasonValue = seasonSelect.value;
+
+            if (graphType === 'championshipProgressionGraph') {
+                sprintScoringDiv.style.display = 'block';
+            } else {
+                sprintScoringDiv.style.display = 'none';
+                sprintScoringSelect.value = '';
+            }
 
             if (seasonValue) {
                 let endpoint = '/get_races';
@@ -103,9 +133,12 @@
             }
         }
 
+
         checkAllSelected();
 
-        selects.forEach(select => select.addEventListener('change', checkAllSelected));
+        [graphTypeSelect, seasonSelect, raceSelect, sprintScoringSelect].forEach(select => {
+            select.addEventListener('change', checkAllSelected);
+        });
 
         graphTypeSelect.addEventListener('change', function() {
             updateRaceOptions();
@@ -114,5 +147,10 @@
         seasonSelect.addEventListener('change', function() {
             updateRaceOptions();
         });
+        
+        {% if img_url %}
+            resetForm();
+        {% endif %}
+
     </script>
-</body></document_content>
+</body>
