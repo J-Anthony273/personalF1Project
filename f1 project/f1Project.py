@@ -1,18 +1,14 @@
 import fastf1
-import matplotlib
-import matplotlib.pyplot as plt
 import fastf1.plotting
-from flask import Flask, send_file, jsonify, render_template, request, session, redirect, url_for
+import plotly.graph_objects as go                                              
+from flask import Flask, send_file, jsonify, render_template, request, url_for
 from flask_wtf import FlaskForm
-from wtforms import StringField, SubmitField, SelectField, HiddenField
-from wtforms.validators import DataRequired, Length
+from wtforms import SubmitField, SelectField                                     
+from wtforms.validators import DataRequired
 from flask_bootstrap import Bootstrap
-from flask_sqlalchemy import SQLAlchemy
 from raceMapping import raceMapping
 import io
 from datetime import timedelta
-import matplotlib.ticker as ticker
-import matplotlib.dates as mdates
 from teammateMapping import teammateMapping
 import numpy as np
 import pandas as pd
@@ -20,6 +16,13 @@ from seasonMapping import seasonMapping
 from scoringSystems import scoringSystems, sprintScoringSystems
 from scoringMapping import scoringMapping, sprintScoringMapping
 
+
+# Races where less than 75% distance was completed so half points were awarded.
+# From 2018-2025 this happened exactly once: 2021 Belgian GP (Spa).
+# The tuple is (season, raceNo) matching the raceMapping numbering.
+HALF_POINTS_RACES = {
+    (2021, 12),  # 2021 Belgian Grand Prix — 2 laps behind SC, half points awarded
+}
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'top secret!'
@@ -70,17 +73,16 @@ def to_seconds(t):
         return t
     return None
 
-def format_time(t, _):
-    minutes = int(t // 60)
-    seconds = t % 60
-    return f"{minutes}:{seconds:06.3f}"
+def format_time(seconds):                                   
+    if seconds is None:                             
+        return "N/A"                                
+    minutes = int(seconds // 60)                    
+    secs = seconds % 60                             
+    return f"{minutes}:{secs:06.3f}"                
+
 
 def positionChanges(season, race):
     try:
-        matplotlib.use('Agg')
-        
-        fastf1.plotting.setup_mpl(mpl_timedelta_support=False, misc_mpl_mods=False, color_scheme='fastf1')
-
         if race.endswith("S"):
             race = race[:-1]
             session = fastf1.get_session(int(season), int(race), "S")
@@ -88,39 +90,65 @@ def positionChanges(season, race):
             session = fastf1.get_session(int(season), int(race), "R")
         session.load(telemetry=False, weather=False)
 
-        fig, ax = plt.subplots(figsize=(12.0, 4.9))
+        fig = go.Figure()                                                     
 
         for drv in session.drivers:
             drv_laps = session.laps.pick_drivers(drv)
             if not drv_laps.empty:
                 abb = drv_laps['Driver'].iloc[0]
-                style = fastf1.plotting.get_driver_style(identifier=abb, style=['color', 'linestyle'], session=session)
-                ax.plot(drv_laps['LapNumber'], drv_laps['Position'], label=abb, **style)
+                try:                                                          
+                    style = fastf1.plotting.get_driver_style(
+                        identifier=abb, style=['color', 'linestyle'], session=session
+                    )
+                    color = style.get('color', '#888888')                   
+                except Exception:                                             
+                    color = '#888888'                                         
 
-        ax.set_ylim([20.5, 0.5])
-        ax.set_yticks([1, 5, 10, 15, 20])
-        ax.set_xlabel('Lap')
-        ax.set_ylabel('Position')
+                laps      = drv_laps['LapNumber'].tolist()                    
+                positions = drv_laps['Position'].tolist()                     
 
-        ax.legend(bbox_to_anchor=(1.0, 1.02))
-        plt.tight_layout()
+                fig.add_trace(go.Scatter(                                     
+                    x=laps,                                                   
+                    y=positions,                                              
+                    mode='lines+markers',                                   
+                    name=abb,                                                 
+                    line=dict(color=color, width=2),                          
+                    marker=dict(color=color, size=7, symbol='circle',         
+                                line=dict(color='white', width=1)),         
+                    hovertemplate=(                                           
+                        f'<b>{abb}</b><br>'                                   
+                        'Lap %{x}<br>'                                        
+                        'Position: %{y}'                                      
+                        '<extra></extra>'                                    
+                    )                                                         
+                ))                                                            
 
-        print("Plot generated successfully")
-        return fig
-        
+        fig.update_layout(                                                   
+            template='plotly_dark',                                           
+            hovermode='x unified',                                           
+            xaxis_title='Lap',                                                
+            yaxis=dict(                                                       
+                title='Position',                                             
+                autorange='reversed',                                         
+                tickvals=[1, 5, 10, 15, 20],                                  
+            ),                                                                
+            legend=dict(x=1.02, y=1, bgcolor='rgba(0,0,0,0)',                
+                        font=dict(size=11)),                                  
+            hoverlabel=dict(namelength=-1),                                    
+            margin=dict(r=120),                                               
+            height=800,                                                        
+            autosize=True,                                                     
+        )                                                                     
+
+        return fig.to_json()                                                 
+
     except Exception as e:
         print(f"Error in positionChanges: {e}")
-        fig, ax = plt.subplots(figsize=(8.0, 4.9))
-        ax.text(0.5, 0.5, f'Error loading data:\n{str(e)}', 
-                horizontalalignment='center', verticalalignment='center',
-                transform=ax.transAxes, fontsize=12)
-        ax.set_title('Error generating plot')
-        return fig
-    
+        return _error_fig(str(e))                                           
+
+
 def qualifyingTimings(season, race):
     try:
-        matplotlib.use('Agg')
-        fastf1.plotting.setup_mpl(mpl_timedelta_support=False, misc_mpl_mods=False, color_scheme='fastf1')
         if race.endswith("S"):
             newRace = race[:-1]
             session = fastf1.get_session(int(season), int(newRace), "SQ")
@@ -128,83 +156,114 @@ def qualifyingTimings(season, race):
             session = fastf1.get_session(int(season), int(race), "Q")
         session.load(telemetry=False, weather=False)
         results = session.results
-        fig, ax = plt.subplots(figsize=(12.0, 4.9))
-        all_times = []
+
+        fig = go.Figure()                                                     
+        all_seconds = []                                                      
 
         for _, row in results.iterrows():
             abb = row['Abbreviation']
-            q1 = row['Q1']
-            q2 = row['Q2']
-            q3 = row['Q3']
-            style = fastf1.plotting.get_driver_style(identifier=abb, style=['color', 'linestyle'], session=session)
-            if q3 != "NaT":
-                y = [to_seconds(q1), to_seconds(q2), to_seconds(q3)]
-            elif q2 != "NaT":
-                y = [to_seconds(q1), to_seconds(q2)]
-            elif q1 != "NaT":
-                y = [to_seconds(q1)]
-            else:
-                y = []
-            all_times.extend(y)
-            x = ["Q1", "Q2", "Q3"]
-            ax.plot(x, y, label = abb, **style, marker = "o")
-        
-        all_times = [t for t in all_times if t is not None]
-        if all_times:
-            min_y = min(all_times)
-            max_y = max(all_times)
-            padding = 0.5
-            ax.set_ylim(min_y - padding, max_y + padding)
-            ax.grid(True, axis='y')
-            ax.yaxis.set_major_locator(mdates.AutoDateLocator())
-            ax.yaxis.set_major_formatter(mdates.DateFormatter('%M:%S.%f'))
-            ax.yaxis.set_major_formatter(ticker.FuncFormatter(format_time))
-        
-        ax.legend(bbox_to_anchor=(1.0, 1.02))
-        plt.tight_layout()
-        return fig
-    
+            q1, q2, q3 = row['Q1'], row['Q2'], row['Q3']
+            try:                                                              
+                style = fastf1.plotting.get_driver_style(
+                    identifier=abb, style=['color', 'linestyle'], session=session
+                )
+                color = style.get('color', '#888888')                        
+            except Exception:                                                
+                color = '#888888'                                            
+
+            x_labels, y_vals, hover_texts = [], [], []                        
+            for label, val in [("Q1", q1), ("Q2", q2), ("Q3", q3)]:         
+                secs = to_seconds(val) if not pd.isna(val) else None          
+                if secs is not None:                                          
+                    x_labels.append(label)                                    
+                    y_vals.append(secs)                                       
+                    hover_texts.append(format_time(secs))                    
+                    all_seconds.append(secs)                                  
+
+            if not y_vals:                                                    
+                continue                                                      
+
+            fig.add_trace(go.Scatter(                                    
+                x=x_labels,                                                   
+                y=y_vals,                                                     
+                mode='lines+markers',                                 
+                name=abb,                                                     
+                line=dict(color=color, width=2),                              
+                marker=dict(color=color, size=9, symbol='circle',          
+                            line=dict(color='white', width=1)),               
+                customdata=hover_texts,                                     
+                hovertemplate=(                                               
+                    f'<b>{abb}</b><br>'                                       
+                    '%{x}: %{customdata}'                                   
+                    '<extra></extra>'                                         
+                )                                                             
+            ))                                                                
+
+        # Build readable y-axis tick labels (M:SS.mmm)                       
+        if all_seconds:                                                       
+            lo, hi = min(all_seconds) - 0.5, max(all_seconds) + 0.5          
+            tick_step = 0.5                                                   
+            tick_vals = list(np.arange(                                       
+                np.floor(lo / tick_step) * tick_step,                         
+                np.ceil(hi  / tick_step) * tick_step + tick_step,            
+                tick_step                                                     
+            ))                                                                
+            tick_texts = [format_time(t) for t in tick_vals]                 
+        else:                                                                 
+            tick_vals, tick_texts = [], []                                    
+
+        fig.update_layout(                                            
+            template='plotly_dark',                                           
+            hovermode='x unified',                                             
+            xaxis=dict(title='Session', categoryorder='array',                
+                       categoryarray=['Q1', 'Q2', 'Q3']),                    
+            yaxis=dict(                                                       
+                title='Lap Time',                                             
+                tickvals=tick_vals,                                         
+                ticktext=tick_texts,                                          
+                range=[min(all_seconds, default=0) - 0.5,                    
+                       max(all_seconds, default=1) + 0.5] if all_seconds else None, 
+            ),                                                                
+            legend=dict(x=1.02, y=1, bgcolor='rgba(0,0,0,0)',                
+                        font=dict(size=11)),                                  
+            hoverlabel=dict(namelength=-1),                                   
+            margin=dict(r=120),                                               
+            height=750,                                                       
+            autosize=True,                                                    
+        )                                                                     
+
+        return fig.to_json()                                                  
+
     except Exception as e:
         print(f"Error in qualifyingTimings: {e}")
-        fig, ax = plt.subplots(figsize=(8.0, 4.9))
-        ax.text(0.5, 0.5, f'Error loading data:\n{str(e)}', 
-                horizontalalignment='center', verticalalignment='center',
-                transform=ax.transAxes, fontsize=12)
-        ax.set_title('Error generating plot')
-        return fig
+        return _error_fig(str(e))                                             
 
 
 def qualifyingAverages(season, pairing):
     try:
-        matplotlib.use("Agg")
-        noOfRaces = {2018 : 21, 2019 : 21, 2020 : 17, 2021 : 22, 2022 : 19, 2023 : 22, 2024 : 24, 2025 : 13}
-        fastf1.plotting.setup_mpl(mpl_timedelta_support=False, misc_mpl_mods=False, color_scheme='fastf1')
-        fig, ax = plt.subplots(figsize=(12.0, 4.9))
+        noOfRaces = {2018: 21, 2019: 21, 2020: 17, 2021: 22,
+                     2022: 19, 2023: 22, 2024: 24, 2025: 13}
         if " - " not in pairing:
-            raise ValueError(f"Invalid pairing format: '{pairing}'. Expected format: 'Driver A - Driver B'")
+            raise ValueError(f"Invalid pairing format: '{pairing}'")
         driverA, driverB = pairing.split(" - ")
-        differences = []
-        counter = 0
-        xAxis= []
-        yAxis = []
+        differences, counter = [], 0
+        xAxis, yAxis = [], []
 
         for raceNo in range(1, noOfRaces[int(season)] + 1):
             event = fastf1.get_event(int(season), int(raceNo))
-            print(event["EventFormat"])
             if event["EventFormat"] == "sprint_qualifying":
                 sprintSession = fastf1.get_session(int(season), int(raceNo), "SQ")
                 sprintSession.load(telemetry=False, weather=False)
-                results = session.results
+                results = sprintSession.results
                 qualiNames = results['FullName'].tolist()
-                if season == "2025" and raceNo > 2 and driverB == "Andrea Kimi Antonelli":
-                    driverB = "Kimi Antonelli"
+                _fix_antonelli(season, raceNo, driverB)                     
                 if driverA in qualiNames and driverB in qualiNames:
-                    driverATeam = results.loc[results['FullName'] == driverA, 'TeamName'].values[0]
-                    driverBTeam = results.loc[results['FullName'] == driverB, 'TeamName'].values[0]
-                    if driverATeam == driverBTeam:
-                        counter, differences = qualifyingAverageCalculator(results, counter, differences, driverA, driverB)
+                    if _same_team(results, driverA, driverB):                
+                        counter, differences = qualifyingAverageCalculator(
+                            results, counter, differences, driverA, driverB)
                         xAxis.append(counter)
                         yAxis.append(sum(differences) / len(differences))
+
             session = fastf1.get_session(int(season), int(raceNo), "Q")
             session.load(telemetry=False, weather=False)
             results = session.results
@@ -212,467 +271,451 @@ def qualifyingAverages(season, pairing):
             if season == "2025" and raceNo > 2 and driverB == "Andrea Kimi Antonelli":
                 driverB = "Kimi Antonelli"
             if driverA in qualiNames and driverB in qualiNames:
-                driverATeam = results.loc[results['FullName'] == driverA, 'TeamName'].values[0]
-                driverBTeam = results.loc[results['FullName'] == driverB, 'TeamName'].values[0]
-                if driverATeam == driverBTeam:
-                    counter, differences = qualifyingAverageCalculator(results, counter, differences, driverA, driverB)
+                if _same_team(results, driverA, driverB):                   
+                    counter, differences = qualifyingAverageCalculator(
+                        results, counter, differences, driverA, driverB)
                     xAxis.append(counter)
                     yAxis.append(sum(differences) / len(differences))
 
-        ax.bar(xAxis, yAxis)
+        bar_colors = ['#e63946' if v > 0 else '#457b9d' for v in yAxis]      
 
-        for i, v in enumerate(yAxis):
-            sign = "+" if v > 0 else ""
-            ax.text(xAxis[i], v + 0.05 if v >= 0 else v - 0.1, f"{sign}{v:.3f}", ha='center', va='bottom' if v >= 0 else 'top', fontsize=6)
+        fig = go.Figure()                                                  
+        fig.add_trace(go.Bar(                                                  
+            x=xAxis,                                                          
+            y=yAxis,                                                          
+            marker_color=bar_colors,                                          
+            hovertemplate=(                                                 
+                'Race #%{x}<br>'                                              
+                'Avg gap: %{y:.3f}s'                                          
+                '<extra></extra>'                                             
+            )                                                                 
+        ))                                                                    
 
-        ax.set_yticks(np.arange(-2, 2.25, 0.25))
-        ax.grid(axis='y', linestyle='--', linewidth=0.7, alpha=0.7)
-        ax.set_title(f"Cumulative Qualifying Average Gap for {pairing} in the {season} F1 season.")
-        ax.set_xlabel("Number of Races as teamates.")
-        ax.set_ylabel("Average Qualifying Gap (seconds).")
-        ax.set_ylim(-2, 2)
-        ax.set_xticks(range(1, counter + 1))
-        description = ("If the bar is negative, the first driver is faster on average; if positive, the second driver is faster.")
-        plt.figtext(0.5, -0.1, description, wrap=True, horizontalalignment='center', fontsize=10)
-        plt.tight_layout()
-        return fig
-    
+        fig.update_layout(                                                     
+            template='plotly_dark',                                           
+            title=f"Cumulative Qualifying Average Gap — {pairing} — {season}", 
+            xaxis=dict(title='Number of races as teammates', dtick=1),        
+            yaxis=dict(title='Average Qualifying Gap (s)', range=[-2, 2],     
+                       dtick=0.25),                                           
+            annotations=[dict(                                             
+                x=0.5, y=-0.18, xref='paper', yref='paper',                  
+                text='Negative = first driver faster; Positive = second driver faster', 
+                showarrow=False, font=dict(size=11)                           
+            )],                                                               
+            height=500,                                                       
+            margin=dict(b=80),                                                
+        )                                                                     
+
+        return fig.to_json()                                                  
+
     except Exception as e:
         print(f"Error in qualifyingAverages: {e}")
-        fig, ax = plt.subplots(figsize=(8.0, 4.9))
-        ax.text(0.5, 0.5, f'Error loading data:\n{str(e)}', 
-                horizontalalignment='center', verticalalignment='center',
-                transform=ax.transAxes, fontsize=12)
-        ax.set_title('Error generating plot')
-        return fig 
+        return _error_fig(str(e))                                             
 
-def championshipProgression(season, system, sprintsystem = None):
+
+def singleQualifyingAverages(season, pairing):
     try:
-        matplotlib.use("Agg") 
-        noOfRaces = {2018 : 21, 2019 : 21, 2020 : 17, 2021 : 22, 2022 : 19, 2023 : 22, 2024 : 24, 2025 : 14}
-        fastf1.plotting.setup_mpl(mpl_timedelta_support=False, misc_mpl_mods=False, color_scheme='fastf1')
-        fig, ax = plt.subplots(figsize=(16.0, 8.0))
+        noOfRaces = {2018: 21, 2019: 21, 2020: 17, 2021: 22,
+                     2022: 19, 2023: 22, 2024: 24, 2025: 14}
+        if " - " not in pairing:
+            raise ValueError(f"Invalid pairing format: '{pairing}'")
+        driverA, driverB = pairing.split(" - ")
+        xAxis, yAxis = [], []
 
-        drivers = {}
-        driversResults = {}
-        driver_points_progression = {}
-        driversRacesRaced = {}
-        reference_session = None
+        for raceNo in range(1, noOfRaces[int(season)] + 1):
+            event = fastf1.get_event(int(season), int(raceNo))
+            if event["EventFormat"] == "sprint_qualifying":
+                sprintSession = fastf1.get_session(int(season), int(raceNo), "SQ")
+                sprintSession.load(telemetry=False, weather=False)
+                results = sprintSession.results
+                qualiNames = results['FullName'].tolist()
+                if season == "2025" and raceNo > 2 and driverB == "Andrea Kimi Antonelli":
+                    driverB = "Kimi Antonelli"
+                if driverA in qualiNames and driverB in qualiNames:
+                    if _same_team(results, driverA, driverB):                 
+                        avg = singleQualifyingAverageCalculator(results, [], driverA, driverB)
+                        xAxis.append(f"Sprint {raceNo}")
+                        yAxis.append(avg)
+
+            session = fastf1.get_session(int(season), int(raceNo), "Q")
+            session.load(telemetry=False, weather=False)
+            results = session.results
+            qualiNames = results['FullName'].tolist()
+            if season == "2025" and raceNo > 2 and driverB == "Andrea Kimi Antonelli":
+                driverB = "Kimi Antonelli"
+            if driverA in qualiNames and driverB in qualiNames:
+                if _same_team(results, driverA, driverB):                    
+                    avg = singleQualifyingAverageCalculator(results, [], driverA, driverB)
+                    xAxis.append(f"Race {raceNo}")
+                    yAxis.append(avg)
+
+        clipped     = [max(min(v, 2), -2) for v in yAxis]
+        bar_colors  = ['#e63946' if v > 0 else '#457b9d' for v in yAxis]     
+        hover_texts = [f"{('+' if v > 0 else '')}{v:.3f}s" for v in yAxis]   
+
+        fig = go.Figure()                                                     
+        fig.add_trace(go.Bar(                                              
+            x=xAxis,                                                          
+            y=clipped,                                                        
+            marker_color=bar_colors,                                          
+            customdata=hover_texts,                                            
+            hovertemplate=(                                                   
+                '%{x}<br>'                                                    
+                'Gap: %{customdata}'                                         
+                '<extra></extra>'                                             
+            )                                                                 
+        ))                                                                    
+
+        fig.update_layout(                                                     
+            template='plotly_dark',                                           
+            title=f"Per-Session Qualifying Gap — {pairing} — {season}",      
+            xaxis=dict(title='Race / Sprint', tickangle=-90),                 
+            yaxis=dict(title='Qualifying Gap (s)', range=[-2, 2], dtick=0.25), 
+            annotations=[dict(                                            
+                x=0.5, y=-0.25, xref='paper', yref='paper',                  
+                text='Negative = first driver faster; Positive = second driver faster', 
+                showarrow=False, font=dict(size=11)                           
+            )],                                                               
+            height=520,                                                       
+            margin=dict(b=120),                                               
+        )                                                                     
+
+        return fig.to_json()                                                  
+
+    except Exception as e:
+        print(f"Error in singleQualifyingAverages: {e}")
+        return _error_fig(str(e))                                             
+
+
+def championshipProgression(season, system, sprintsystem=None):
+    try:
+        noOfRaces = {2018: 21, 2019: 21, 2020: 17, 2021: 22,
+                     2022: 19, 2023: 22, 2024: 24, 2025: 14}
+
+        drivers            = {}
+        driversResults     = {}
+        driver_points_prog = {}
+        driversRacesRaced  = {}
+        driversPositions   = {}  
+        reference_session  = None
 
         scoring = dict(scoringSystems)[int(system)]
 
         sprint_scoring = None
         if sprintsystem:
-            sprint_system_id = int(sprintsystem)
-            if sprint_system_id == 1:
+            sid = int(sprintsystem)
+            if sid == 1:
                 sprint_scoring = {"1": 3, "2": 2, "3": 1}
-            elif sprint_system_id == 2:
-                sprint_scoring = {"1": 8, "2": 7, "3": 6, "4": 5, "5": 4, "6": 3, "7": 2, "8": 1}
-
+            elif sid == 2:
+                sprint_scoring = {"1": 8, "2": 7, "3": 6, "4": 5,
+                                  "5": 4, "6": 3, "7": 2, "8": 1}
 
         for raceNo in range(1, noOfRaces[int(season)] + 1):
             event = fastf1.get_event(int(season), int(raceNo))
             if event["EventFormat"] == "sprint_qualifying" and sprint_scoring:
-                if int(season) == 2021:
-                    session = fastf1.get_session(int(season), raceNo, 'SQ')
-                else:
-                    session = fastf1.get_session(int(season), raceNo, 'S')
-                session.load()
-                results = session.results.loc[:, ['Abbreviation', 'FirstName', 'LastName', 'ClassifiedPosition']].copy()
-                results['DriverName'] = results['FirstName'] + ' ' + results['LastName']
-                for _, row in results.iterrows():
-                    abb = row['Abbreviation']
-                    driver_name = row['DriverName']
-                    pos = row['ClassifiedPosition']
+                s_type = 'SQ' if int(season) == 2021 else 'S'
+                sp_sess = fastf1.get_session(int(season), raceNo, s_type)
+                sp_sess.load()
+                sp_results = sp_sess.results.loc[
+                    :, ['Abbreviation', 'FirstName', 'LastName', 'ClassifiedPosition']
+                ].copy()
+                sp_results['DriverName'] = sp_results['FirstName'] + ' ' + sp_results['LastName']
+                for _, row in sp_results.iterrows():
+                    abb  = row['Abbreviation']
+                    name = row['DriverName']
+                    pos  = row['ClassifiedPosition']
+                    if name not in drivers:
+                        drivers[name] = 0
+                        driversResults[name] = []
+                        driver_points_prog[abb] = []
+                        driversPositions[abb] = []  
+                    pts = sprint_scoring.get(str(pos), 0)
+                    driversResults[name].append(pts)
+                    drivers[name] += pts
+                    driversPositions[abb].append(str(pos))  
 
-                    if driver_name not in drivers:
-                        drivers[driver_name] = 0
-                        driversResults[driver_name] = []
-                        driver_points_progression[abb] = []
-                        
-                    points = sprint_scoring.get(str(pos), 0)
-                    if driver_name not in driversResults:
-                        driversResults[driver_name] = []
-                    driversResults[driver_name].append(points)
-                    drivers[driver_name] += points
-
-                
             session = fastf1.get_session(int(season), raceNo, 'R')
             session.load()
             reference_session = session
 
-            results = session.results.loc[:, ['Abbreviation', 'FirstName', 'LastName', 'ClassifiedPosition']].copy()
+            results = session.results.loc[
+                :, ['Abbreviation', 'FirstName', 'LastName', 'ClassifiedPosition']
+            ].copy()
             results['DriverName'] = results['FirstName'] + ' ' + results['LastName']
 
-            fastest_lap = session.laps.pick_fastest()
-            fastest_driver = fastest_lap['Driver'] if fastest_lap is not None else None
-            results['GotFastestLap'] = results['Abbreviation'] == fastest_driver
-            
+            # Only consider laps from classified finishers with a valid lap time  
+            classified_abbs = results.loc[                                     
+                results['ClassifiedPosition'].apply(                           
+                    lambda x: str(x).isdigit()                                
+                ), 'Abbreviation'                                               
+            ].tolist()                                                         
+            valid_laps = session.laps[                                         
+                session.laps['Driver'].isin(classified_abbs) &                  
+                session.laps['LapTime'].notna() &                               
+                ~session.laps['Deleted']                                    
+            ]                                                                  
+            if not valid_laps.empty:                                           
+                fastest_driver = valid_laps.loc[                               
+                    valid_laps['LapTime'].idxmin(), 'Driver'                   
+                ]                                                              
+            else:                                                              
+                fastest_driver = None                                          
+            results['GotFastestLap'] = results['Abbreviation'] == fastest_driver  
+
             for _, row in results.iterrows():
-                abb = row['Abbreviation']
-                driver_name = row['DriverName']
-                pos = row['ClassifiedPosition']
-                gotFL = row['GotFastestLap']
+                abb    = row['Abbreviation']
+                name   = row['DriverName']
+                pos    = row['ClassifiedPosition']
+                got_fl = row['GotFastestLap']
 
-                if driver_name not in drivers:
-                    drivers[driver_name] = 0
-                    driversResults[driver_name] = []
-                    driver_points_progression[abb] = []
-                    
-                points = scoring.get(pos, 0)
-                flRule = scoring.get("FL", False)
-                if flRule:
-                    if isinstance(flRule, bool) and flRule:
-                        if gotFL:
-                            points += 1
-                    elif isinstance(flRule, int):
-                        if gotFL and int(pos) <= int(flRule):
-                            points += 1
-                            
-                driversResults[driver_name].append(points)
-                countedRaces = scoring.get("Counted")
-                if isinstance(countedRaces, int):
-                    driversResults[driver_name].sort(reverse=True)
-                    drivers[driver_name] = sum(driversResults[driver_name][:countedRaces])
+                if name not in drivers:
+                    drivers[name] = 0
+                    driversResults[name] = []
+                    driver_points_prog[abb] = []
+                    driversPositions[abb] = []  
+
+                driversPositions[abb].append(str(pos))  
+                multiplier = 0.5 if (int(season), raceNo) in HALF_POINTS_RACES else 1.0   
+                pts     = scoring.get(pos, 0) * multiplier                   
+                fl_rule = scoring.get("FL", False)
+                if fl_rule:
+                    if isinstance(fl_rule, bool) and fl_rule and got_fl:
+                        pts += 1 * multiplier                                 
+                    elif isinstance(fl_rule, int) and got_fl:
+                        try:                                                   
+                            if int(pos) <= int(fl_rule):                       
+                                pts += 1 * multiplier                        
+                        except (ValueError, TypeError):                     
+                            pass                                               
+
+                driversResults[name].append(pts)
+                counted = scoring.get("Counted")
+                if isinstance(counted, int):
+                    driversResults[name].sort(reverse=True)
+                    drivers[name] = sum(driversResults[name][:counted])
                 else:
-                    drivers[driver_name] += points
-                    
-                driver_points_progression[abb].append(drivers[driver_name])
+                    drivers[name] += pts
 
-                if abb in driversRacesRaced:
-                    driversRacesRaced[abb].append(raceNo)
-                else:
-                    driversRacesRaced[abb] = []
-                    driversRacesRaced[abb].append(raceNo)
+                driver_points_prog[abb].append(drivers[name])
+                driversRacesRaced.setdefault(abb, []).append(raceNo)          
 
-        final_points_dict = {
-            abb: totals[-1] for abb, totals in driver_points_progression.items()
-        }
-        sorted_drivers = sorted(final_points_dict.items(), key=lambda x: x[1], reverse=True)
-        fallback_colors = plt.cm.tab20(np.linspace(0, 1, 20))
+        final_pts = {abb: totals[-1] for abb, totals in driver_points_prog.items()}
+
+        def countback_key(item):                                               
+            abb, pts = item                                                   
+            positions = driversPositions.get(abb, [])                         
+            pos_counts = tuple(                                               
+                -positions.count(str(p)) for p in range(1, 21)               
+            )                                                                 
+            return (-pts, *pos_counts)                                     
+
+        sorted_drivers = sorted(final_pts.items(), key=countback_key)      
+
+        fallback_colors = [                                                   
+            '#e6194b','#3cb44b','#ffe119','#4363d8','#f58231','#911eb4',      
+            '#42d4f4','#f032e6','#bfef45','#fabed4','#469990','#dcbeff',      
+            '#9A6324','#fffac8','#800000','#aaffc3','#808000','#ffd8b1',      
+            '#000075','#a9a9a9'                                               
+        ]                                                                     
         color_index = 0
 
+        fig = go.Figure()                                                
+
         for abb, _ in sorted_drivers:
-            totals = driver_points_progression[abb]
-            races_participated = driversRacesRaced[abb]
-            final_points = totals[-1]
-            label = f"{abb}-{final_points}"
+            totals = driver_points_prog[abb]
+            races  = driversRacesRaced[abb]
+            label  = f"{abb} ({totals[-1]} pts)"                     
 
             try:
                 style = fastf1.plotting.get_driver_style(
-                    identifier=abb, 
-                    style=['color', 'linestyle'], 
+                    identifier=abb, style=['color', 'linestyle'],
                     session=reference_session
                 )
-                ax.plot(races_participated, totals, label=label, **style)
-            except Exception as style_error:
-                print(f"Warning: Could not get style for driver {abb}: {style_error}")
-                fallback_color = fallback_colors[color_index % len(fallback_colors)]
-                ax.plot(races_participated, totals, label=label, color=fallback_color, linewidth=2)
+                color = style.get('color', fallback_colors[color_index % len(fallback_colors)]) 
+            except Exception:
+                color = fallback_colors[color_index % len(fallback_colors)]
                 color_index += 1
 
-        ax.set_xlabel('Race Number')
-        ax.set_ylabel('Championship Points')
-        
-        ax.set_xticks(range(1, noOfRaces[int(season)] + 1))
-        ax.grid(True, alpha=0.3)
-        systems = dict(scoringMapping)
-        sprint_text = ""
+            fig.add_trace(go.Scatter(                                      
+                x=races,                                                      
+                y=totals,                                                     
+                mode='lines+markers',                                        
+                name=label,                                                   
+                line=dict(color=color, width=2),                              
+                marker=dict(color=color, size=7, symbol='circle',             
+                            line=dict(color='white', width=1)),               
+                hovertemplate=(                                               
+                    f'<b>{abb}</b><br>'                                       
+                    'After race %{x}<br>'                                     
+                    'Points: %{y}'                                            
+                    '<extra></extra>'                                         
+                )                                                             
+            ))                                                                
+
+        systems_dict = dict(scoringMapping)
+        sprint_text  = ""
         if sprintsystem and sprint_scoring:
-            sprint_systems = dict(sprintScoringMapping)
-            sprint_text = f" with {sprint_systems[int(sprintsystem)]}"
-        ax.set_title(f"Championship progression for the {season} season using the {systems[int(system)]}{sprint_text}.")
+            sprint_dict = dict(sprintScoringMapping)
+            sprint_text = f" + {sprint_dict[int(sprintsystem)]}"
 
-        handles, labels = ax.get_legend_handles_labels()
-        handles_labels = list(zip(labels, handles))
-        handles_labels.sort(key=lambda x: int(x[0].split('-')[-1]), reverse=True)
-        labels, handles = zip(*handles_labels)
-        ax.legend(handles, labels, bbox_to_anchor=(1.05, 1), loc='upper left')
+        fig.update_layout(                                                   
+            template='plotly_dark',                                           
+            hovermode='x unified',                                            
+            title=f"Championship Progression — {season} — {systems_dict[int(system)]}{sprint_text}", 
+            xaxis=dict(title='Race Number', dtick=1),                         
+            yaxis=dict(title='Championship Points'),                          
+            legend=dict(                                                      
+                x=0, y=-0.25,                                                  
+                orientation='h',                                              
+                bgcolor='rgba(0,0,0,0)',                                      
+                font=dict(size=10),                                           
+            ),                                                                
+            hoverlabel=dict(namelength=-1),                                  
+            margin=dict(b=200, t=60, l=60, r=40),                       
+            height=1000,                                                 
+            autosize=True,                                                    
+        )                                                                     
 
-        plt.tight_layout()
-        return fig
-               
+        return fig.to_json()                                                  
+
     except Exception as e:
         print(f"Error in championshipProgression: {e}")
-        fig, ax = plt.subplots(figsize=(8.0, 4.9))
-        ax.text(0.5, 0.5, f'Error loading data:\n{str(e)}', 
-                horizontalalignment='center', verticalalignment='center',
-                transform=ax.transAxes, fontsize=12)
-        ax.set_title('Error generating plot')
-        return fig
+        return _error_fig(str(e))                                             
 
-def singleQualifyingAverages(season, pairing):
-    try:
-        matplotlib.use("Agg")
-        noOfRaces = {2018 : 21, 2019 : 21, 2020 : 17, 2021 : 22, 2022 : 19, 2023 : 22, 2024 : 24, 2025 : 14}
-        fastf1.plotting.setup_mpl(mpl_timedelta_support=False, misc_mpl_mods=False, color_scheme='fastf1')
-        fig, ax = plt.subplots(figsize=(12.0, 4.9))
-        if " - " not in pairing:
-            raise ValueError(f"Invalid pairing format: '{pairing}'. Expected format: 'Driver A - Driver B'")
-        driverA, driverB = pairing.split(" - ")
-        counter = 0
-        differences = []
-        xAxis= []
-        yAxis = []
 
-        for raceNo in range(1, noOfRaces[int(season)] + 1):
-            event = fastf1.get_event(int(season), int(raceNo))
-            if event["EventFormat"] == "sprint_qualifying":
-                counter += 1
-                sprintSession = fastf1.get_session(int(season), int(raceNo), "SQ")
-                sprintSession.load(telemetry=False, weather=False)
-                results = session.results
-                qualiNames = results['FullName'].tolist()
-                if season == "2025" and raceNo > 2 and driverB == "Andrea Kimi Antonelli":
-                    driverB = "Kimi Antonelli"
-                if driverA in qualiNames and driverB in qualiNames:
-                    driverATeam = results.loc[results['FullName'] == driverA, 'TeamName'].values[0]
-                    driverBTeam = results.loc[results['FullName'] == driverB, 'TeamName'].values[0]
-                    if driverATeam == driverBTeam:
-                        average = singleQualifyingAverageCalculator(results, differences, driverA, driverB)
-                        differences = []
-                        xAxis.append(f"Sprint Race {counter}")
-                        yAxis.append(average)
-            session = fastf1.get_session(int(season), int(raceNo), "Q")
-            session.load(telemetry=False, weather=False)
-            results = session.results
-            qualiNames = results['FullName'].tolist()
-            if season == "2025" and raceNo > 2 and driverB == "Andrea Kimi Antonelli":
-                driverB = "Kimi Antonelli"
-            if driverA in qualiNames and driverB in qualiNames:
-                driverATeam = results.loc[results['FullName'] == driverA, 'TeamName'].values[0]
-                driverBTeam = results.loc[results['FullName'] == driverB, 'TeamName'].values[0]
-                if driverATeam == driverBTeam:
-                    average = singleQualifyingAverageCalculator(results, differences, driverA, driverB)
-                    differences = []
-                    xAxis.append(f"Race {raceNo}")
-                    yAxis.append(average)
-        
-        clippedYAxis = [max(min(v, 2), -2) for v in yAxis]
-        ax.bar(xAxis, clippedYAxis)
 
-        for i, (orig, clipped) in enumerate(zip(yAxis, clippedYAxis)):
-            sign = "+" if orig > 0 else ""
+def _error_fig(msg):                                                           
+    fig = go.Figure()                                                         
+    fig.add_annotation(text=f"Error: {msg}", x=0.5, y=0.5,                   
+                       xref='paper', yref='paper', showarrow=False,           
+                       font=dict(size=14, color='red'))                       
+    fig.update_layout(template='plotly_dark', height=400)                     
+    return fig.to_json()                                                      
 
-            if orig > 2:
-                ax.text(xAxis[i], 2 - 0.05, f"{sign}{orig:.3f}", ha='center', va='top', fontsize=6, fontweight='bold')
-            elif orig < -2:
-                ax.text(xAxis[i], -2 + 0.05, f"{sign}{orig:.3f}", ha='center', va='bottom', fontsize=6, fontweight='bold')
-            else:
-                ax.text(xAxis[i], orig + 0.05 if orig >= 0 else orig - 0.1, f"{sign}{orig:.3f}", ha='center', va='bottom' if orig >= 0 else 'top', fontsize=6,  fontweight='bold')
+def _same_team(results, driverA, driverB):                                     
+    teamA = results.loc[results['FullName'] == driverA, 'TeamName'].values[0] 
+    teamB = results.loc[results['FullName'] == driverB, 'TeamName'].values[0] 
+    return teamA == teamB                                                      
 
-        ax.set_yticks(np.arange(-2, 2.25, 0.25))
-        ax.grid(axis='y', linestyle='--', linewidth=0.7, alpha=0.7)
-        ax.set_title(f"Qualifying Average Gap in each race for {pairing} in the {season} F1 season.")
-        ax.set_xlabel("Race/Sprint Race Number ")
-        ax.set_ylabel("Average Qualifying Gap (seconds).")
-        ax.set_ylim(-2, 2)
-        ax.set_xticklabels(xAxis, rotation=90, ha='right', fontsize=7)
-        description = ("If the bar is negative, the first driver is faster on average; if positive, the second driver is faster.")
-        plt.figtext(0.5, -0.1, description, wrap=True, horizontalalignment='center', fontsize=10)
-        plt.tight_layout()
-        return fig
+def _fix_antonelli(season, raceNo, driverB):                                  
+    if season == "2025" and raceNo > 2 and driverB == "Andrea Kimi Antonelli": 
+        return "Kimi Antonelli"                                                
+    return driverB                                                             
 
-    except Exception as e:
-        print(f"Error in singleQualifyingAverages: {e}")
-        fig, ax = plt.subplots(figsize=(8.0, 4.9))
-        ax.text(0.5, 0.5, f'Error loading data:\n{str(e)}', 
-                horizontalalignment='center', verticalalignment='center',
-                transform=ax.transAxes, fontsize=12)
-        ax.set_title('Error generating plot')
-        return fig   
-
-    
 def qualifyingAverageCalculator(results, counter, differences, driverA, driverB):
     counter += 1
-    driverAQ1 = results.loc[results['FullName'] == driverA, 'Q1'].values[0]
-    driverBQ1 = results.loc[results['FullName'] == driverB, 'Q1'].values[0]
-    driverAQ2 = results.loc[results['FullName'] == driverA, 'Q2'].values[0]
-    driverBQ2 = results.loc[results['FullName'] == driverB, 'Q2'].values[0]
-    driverAQ3 = results.loc[results['FullName'] == driverA, 'Q3'].values[0]
-    driverBQ3 = results.loc[results['FullName'] == driverB, 'Q3'].values[0]
-
-    if not pd.isna(driverAQ1) and not pd.isna(driverBQ1):
-        difference = (driverAQ1 - driverBQ1) / np.timedelta64(1, 's')
-        differences.append(difference)
-                
-    if not pd.isna(driverAQ2) and not pd.isna(driverBQ2):
-        difference = (driverAQ2 - driverBQ2) / np.timedelta64(1, 's')
-        differences.append(difference)
-
-    if not pd.isna(driverAQ3) and not pd.isna(driverBQ3):
-        difference = (driverAQ3 - driverBQ3) / np.timedelta64(1, 's')
-        differences.append(difference)
-
+    for col in ['Q1', 'Q2', 'Q3']:                                            
+        aVal = results.loc[results['FullName'] == driverA, col].values[0]     
+        bVal = results.loc[results['FullName'] == driverB, col].values[0]     
+        if not pd.isna(aVal) and not pd.isna(bVal):                           
+            diff = (aVal - bVal) / np.timedelta64(1, 's')                     
+            differences.append(diff)                                           
     return counter, differences
 
 def singleQualifyingAverageCalculator(results, differences, driverA, driverB):
-    driverAQ1 = results.loc[results['FullName'] == driverA, 'Q1'].values[0]
-    driverBQ1 = results.loc[results['FullName'] == driverB, 'Q1'].values[0]
-    driverAQ2 = results.loc[results['FullName'] == driverA, 'Q2'].values[0]
-    driverBQ2 = results.loc[results['FullName'] == driverB, 'Q2'].values[0]
-    driverAQ3 = results.loc[results['FullName'] == driverA, 'Q3'].values[0]
-    driverBQ3 = results.loc[results['FullName'] == driverB, 'Q3'].values[0]
-
-    if not pd.isna(driverAQ1) and not pd.isna(driverBQ1):
-        difference = (driverAQ1 - driverBQ1) / np.timedelta64(1, 's')
-        differences.append(difference)
-                
-    if not pd.isna(driverAQ2) and not pd.isna(driverBQ2):
-        difference = (driverAQ2 - driverBQ2) / np.timedelta64(1, 's')
-        differences.append(difference)
-
-    if not pd.isna(driverAQ3) and not pd.isna(driverBQ3):
-        difference = (driverAQ3 - driverBQ3) / np.timedelta64(1, 's')
-        differences.append(difference)
-
-    average = sum(differences)/ len(differences)
-    return average
+    for col in ['Q1', 'Q2', 'Q3']:                                            
+        aVal = results.loc[results['FullName'] == driverA, col].values[0]     
+        bVal = results.loc[results['FullName'] == driverB, col].values[0]     
+        if not pd.isna(aVal) and not pd.isna(bVal):                           
+            diff = (aVal - bVal) / np.timedelta64(1, 's')                     
+            differences.append(diff)                                           
+    if not differences:                                                      
+        return 0                                                              
+    return sum(differences) / len(differences)
 
 
+# ---------------------------------------------------------------------------
+# FLASK ROUTES
+# ---------------------------------------------------------------------------
 
-
-
-@app.route('/', methods = ['GET', 'POST'])
+@app.route('/', methods=['GET', 'POST'])
 def homePage():
     form = optionForm()
-    img_url = None
-
-    print(f"Request method: {request.method}")
-    print(f"Form data: {request.form}")
+    plot_data_url = None                                             
 
     season_value = request.form.get('season') if request.method == "POST" else None
-    graph_type = request.form.get('graphType') if request.method == "POST" else None
+    graph_type   = request.form.get('graphType') if request.method == "POST" else None
+    race_value   = request.form.get('races') if request.method == "POST" else None  
 
     if season_value:
-        if graph_type == 'qualifyingAverages' or graph_type == 'singleQualifyingAverages':
-            race_choices = teammateMapping.get(season_value, [])
+        if graph_type in ('qualifyingAverages', 'singleQualifyingAverages'):
+            race_choices = list(teammateMapping.get(season_value, []))
             race_choices.insert(0, ("", "--Driver Pairings--"))
-
         elif graph_type == "championshipProgressionGraph":
             race_choices = list(scoringMapping)
             race_choices.insert(0, ("", "--Scoring Systems--"))
-
         else:
-            race_choices = raceMapping.get(season_value, [])
+            race_choices = list(raceMapping.get(season_value, []))
             race_choices.insert(0, ("", "--Race--"))
-
         form.races.choices = race_choices
-        print(f"Form valid: {form.validate_on_submit()}")
-    
-    if form.errors:
-        print(f"Form errors: {form.errors}")
 
-    if request.method == "POST" and form.validate_on_submit():
-        graphType = form.graphType.data
-        season = form.season.data
-        race = form.races.data
-        sprintScoring = form.sprintScoring.data if graphType == "championshipProgressionGraph" else None
+    if request.method == "POST" and graph_type and season_value and race_value: 
+        sprint_value  = request.form.get('sprintScoring') if graph_type == "championshipProgressionGraph" else None 
+        plot_data_url = url_for("plot_data",                                   
+                                season=season_value,                          
+                                race=race_value,                              
+                                sprintScoring=sprint_value)                   
 
-        img_url = url_for("plot_png", graphType=graphType, season=season, race=race, sprintScoring=sprintScoring)
-    
-    return render_template("index.html", form=form, img_url=img_url)
+    return render_template("index.html", form=form, plot_data_url=plot_data_url)  
 
-@app.route('/get_races', methods = ['POST'])
+
+@app.route('/get_races', methods=['POST'])
 def getRaces():
     seasonValue = request.json.get("season")
-    raceChoices = raceMapping.get(seasonValue, [])
+    raceChoices = list(raceMapping.get(seasonValue, []))
     raceChoices.insert(0, ("", "--Race--"))
     return jsonify(raceChoices)
 
-@app.route('/get_pairings', methods = ['POST'])
+@app.route('/get_pairings', methods=['POST'])
 def getPairings():
-    seasonValue = request.json.get("season")
-    pairingChoices= teammateMapping.get(seasonValue, [])
+    seasonValue    = request.json.get("season")
+    pairingChoices = list(teammateMapping.get(seasonValue, []))
     pairingChoices.insert(0, ("", "--Driver Pairings--"))
     return jsonify(pairingChoices)
 
-@app.route('/get_systems', methods = ['POST'])
+@app.route('/get_systems', methods=['POST'])
 def getSystems():
     systemChoices = list(scoringMapping)
     systemChoices.insert(0, ("", "--Scoring Systems--"))
     return jsonify(systemChoices)
 
-@app.route("/plot.png")
-def plot_png():
-    graphType = request.args.get("graphType")
-    season = request.args.get("season")
-    race = request.args.get("race")
-    sprintScoring = request.args.get("sprintScoring")
-    
-    if graphType == "positionChanges":
-        try:
-            fig = positionChanges(season, race)
-            buf = io.BytesIO()
-            fig.savefig(buf, format="png", bbox_inches='tight')
-            buf.seek(0)
-            plt.close(fig)
-            return send_file(buf, mimetype="image/png")
-        
-        except Exception as e:
-            print(f"Error generating plot: {e}")
-            plt.close('all')
-            return f"Error generating plot: {e}", 500
-        
-    elif graphType == "qualifyingTimings":
-        try:
-            fig = qualifyingTimings(season, race)
-            buf = io.BytesIO()
-            fig.savefig(buf, format="png", bbox_inches='tight')
-            buf.seek(0)
-            plt.close(fig)
-            return send_file(buf, mimetype="image/png")
-        
-        except Exception as e:
-            print(f"Error generating plot: {e}")
-            plt.close('all')
-            return f"Error generating plot: {e}", 500
-    
-    elif graphType == "qualifyingAverages":
-        try:
-            fig = qualifyingAverages(season, race)
-            buf = io.BytesIO()
-            fig.savefig(buf, format="png", bbox_inches='tight')
-            buf.seek(0)
-            plt.close(fig)
-            return send_file(buf, mimetype="image/png")
-        
-        except Exception as e:
-            print(f"Error generating plot: {e}")
-            plt.close('all')
-            return f"Error generating plot: {e}", 500
-        
-    elif graphType == "singleQualifyingAverages":
-        try:
-            fig = singleQualifyingAverages(season, race)
-            buf = io.BytesIO()
-            fig.savefig(buf, format="png", bbox_inches='tight')
-            buf.seek(0)
-            plt.close(fig)
-            return send_file(buf, mimetype="image/png")
-        
-        except Exception as e:
-            print(f"Error generating plot: {e}")
-            plt.close('all')
-            return f"Error generating plot: {e}", 500
-        
-    elif graphType == "championshipProgressionGraph":
-        try:
-            fig = championshipProgression(season, race, sprintScoring)
-            buf = io.BytesIO()
-            fig.savefig(buf, format="png", bbox_inches='tight')
-            buf.seek(0)
-            plt.close(fig)
-            return send_file(buf, mimetype="image/png")
-        
-        except Exception as e:
-            print(f"Error generating plot: {e}")
-            plt.close('all')
-            return f"Error generating plot: {e}", 500
-    
 
-    
-    return "Invalid graph type", 400
+@app.route("/plot_data")                                                      
+def plot_data():                                                              
+    """Returns Plotly JSON so the browser can render an interactive chart.""" 
+    graphType     = request.args.get("graphType")                             
+    season        = request.args.get("season")                                
+    race          = request.args.get("race")                                  
+    sprintScoring = request.args.get("sprintScoring")                         
+          
+    if not graphType or not season or not race:                               
+        missing = [k for k, v in                                              
+                   {"graphType": graphType, "season": season, "race": race}.items() 
+                   if not v]                                                  
+        return jsonify({"error": f"Missing required parameters: {missing}"}), 400 
+
+    dispatch = {                                                              
+        "positionChanges":              lambda: positionChanges(season, race), 
+        "qualifyingTimings":            lambda: qualifyingTimings(season, race), 
+        "qualifyingAverages":           lambda: qualifyingAverages(season, race), 
+        "singleQualifyingAverages":     lambda: singleQualifyingAverages(season, race), 
+        "championshipProgressionGraph": lambda: championshipProgression(season, race, sprintScoring), 
+    }                                                                 
+
+    fn = dispatch.get(graphType)                                           
+    if fn is None:                                                          
+        return jsonify({"error": f"Unknown graph type: {graphType}"}), 400  
+
+    plot_json = fn()                                                       
+    if plot_json is None:                                                  
+        return jsonify({"error": "Failed to generate chart"}), 500          
+
+    return app.response_class(                                               
+        response=plot_json,                                                   
+        status=200,                                                           
+        mimetype='application/json'                                           
+    )                                                                         
+
 
 if __name__ == '__main__':
-    app.run(debug=True, port = 5050)
+    app.run(debug=True, port=5050)

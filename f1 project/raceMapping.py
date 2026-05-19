@@ -207,6 +207,16 @@ raceMapping = {
         ("14", "Hungarian Grand Prix"),
         ("15", "Dutch Grand Prix"),
         ("16", "Italian Grand Prix"),
-        ("17", "Azerbaijan Grand Prix")
+        ("17", "Azerbaijan Grand Prix"),
+        ("18", "Singapore Grand Prix"),
+        ("19S", "United States Sprint Race"),
+        ("19", "Unites States Grand Prix"),
+        ("20", "Mexico City Grand Prix"),
+        ("21S", "São Paulo Sprint Race"),
+        ("21", "São Paulo Grand Prix"),
+        ("22", "Las Vegas Grand Prix"),
+        ("23S", "Qatar Sprint Race"),
+        ("23", "Qatar Grand Prix"),
+        ("24", "Abu Dhabi Grand Prix")
     ]
 }

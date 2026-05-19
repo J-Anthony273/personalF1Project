@@ -1,156 +1,182 @@
 <!DOCTYPE html>
-
-<html lang = "en">
-
-</html>
+<html lang="en">
 <head>
     <meta charset="UTF-8" />
     <title>F1 Plotter</title>
+
+    <!-- new — Plotly.js gives us interactive charts with hover & markers -->
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>          <!-- new -->
+
+    <!-- new — basic dark styles; your original had none -->
+    <style>                                                                    /* new */
+        body { font-family: sans-serif; background: #111; color: #eee; padding: 20px; } /* new */
+        h1   { margin-bottom: 16px; }                                          /* new */
+        .container { max-width: 98vw; margin: auto; }                         /* new — was 1200px; near-full viewport width */
+        select, button { margin: 6px 0; padding: 6px 10px; font-size: 14px; } /* new */
+        #chartWrapper { display: none; margin-top: 28px; }                     /* new */
+        #loadingMsg   { display: none; color: #aaa; font-style: italic; margin-top: 16px; } /* new */
+        #plotDiv      { width: 100%; min-height: 800px; }                      /* new — was 500px; matches the taller Plotly heights */
+    </style>                                                                   /* new */
 </head>
 <body>
-    <div class="container">
-        <h1>Select Plot Options</h1>
-        <form method="POST">
-            {{ form.hidden_tag() }}
+<div class="container">
+    <h1>Select Plot Options</h1>
+    <form method="POST">
+        {{ form.hidden_tag() }}
 
-            <div>
+        <div>
             Graph Type<br>
             {{ form.graphType }}
-            </div>
-            <div>
+        </div>
+        <div>
             Season<br>
             {{ form.season }}
-            </div>
-            <div>
+        </div>
+        <div>
             <span id="racesLabel">Races</span><br>
             {{ form.races }}
-            </div>
-            <div id="sprintScoringDiv" style="display: none;">
+        </div>
+        <div id="sprintScoringDiv" style="display:none;">
             Sprint Scoring System<br>
             {{ form.sprintScoring }}
-            </div>
+        </div>
 
-            {{ form.submit(id="submitButton", disabled="disabled") }}
-        </form>
+        {{ form.submit(id="submitButton", disabled="disabled") }}
+    </form>
 
-        {% if img_url %}
-            <hr>
-            <h2>Generated Plot:</h2>
-            <img src="{{ img_url }}" alt="Plot Image" style="max-width: 100%; height: auto;">
-        {% endif %}
-    </div>
+    <p id="loadingMsg">⏳ Generating chart — this may take a moment…</p>     <!-- new -->
 
-    <script>
-        const selects = document.querySelectorAll('select');
-        const graphTypeSelect = document.querySelector('select[name="graphType"]');
-        const seasonSelect = document.querySelector('select[name="season"]');
-        const raceSelect = document.querySelector('select[name="races"]');
-        const sprintScoringSelect = document.querySelector('select[name="sprintScoring"]');
-        const submitButton = document.getElementById('submitButton');
-        const racesLabel = document.getElementById('racesLabel');
-        const sprintScoringDiv = document.getElementById('sprintScoringDiv');
+    <!-- new — replaces the old <img src="{{ img_url }}"> block -->
+    <div id="chartWrapper">                                                    <!-- new -->
+        <hr>                                                                   <!-- new -->
+        <h2>Generated Plot:</h2>                                               <!-- new -->
+        <div id="plotDiv"></div>                                               <!-- new — Plotly renders the interactive chart here -->
+    </div>                                                                     <!-- new -->
+</div>
 
-        function resetForm() {
-            graphTypeSelect.value = '';
-            seasonSelect.value = '';
-            raceSelect.innerHTML = '<option value="">--Race--</option>';
-            sprintScoringSelect.value = '';
-            racesLabel.textContent = 'Races';
-            sprintScoringDiv.style.display = 'none';
-            checkAllSelected();
-        }
+<script>
+    const graphTypeSelect     = document.querySelector('select[name="graphType"]');
+    const seasonSelect        = document.querySelector('select[name="season"]');
+    const raceSelect          = document.querySelector('select[name="races"]');
+    const sprintScoringSelect = document.querySelector('select[name="sprintScoring"]');
+    const submitButton        = document.getElementById('submitButton');
+    const racesLabel          = document.getElementById('racesLabel');
+    const sprintScoringDiv    = document.getElementById('sprintScoringDiv');
+    const loadingMsg          = document.getElementById('loadingMsg');         // new
+    const chartWrapper        = document.getElementById('chartWrapper');       // new
 
-        function checkAllSelected(){
-            const graphType = graphTypeSelect.value;
-            let requiredSelects = [graphTypeSelect, seasonSelect, raceSelect];
+    // -----------------------------------------------------------------------
+    // new — fetch Plotly JSON from /plot_data and render the interactive chart
+    // -----------------------------------------------------------------------
+    {% if plot_data_url %}                                                     {# new — was: {% if img_url %} #}
+    (async () => {                                                             // new
+        loadingMsg.style.display  = 'block';                                  // new
+        chartWrapper.style.display = 'none';                                  // new
+        try {                                                                  // new
+            const resp = await fetch("{{ plot_data_url | safe }}");           // new — | safe prevents Jinja2 escaping & as &amp; in the URL
+            if (!resp.ok) throw new Error(`Server error: ${resp.status}`);    // new
+            const plotlyJson = await resp.json();                              // new
+            // Override layout to fill container width before rendering      // new
+            plotlyJson.layout.width  = undefined;                             // new — let Plotly size to container
+            plotlyJson.layout.autosize = true;                                // new
+            Plotly.react('plotDiv', plotlyJson.data, plotlyJson.layout, {     // new — renders the interactive chart
+                responsive: true,                                             // new
+                displayModeBar: true,                                         // new
+                modeBarButtonsToRemove: ['lasso2d', 'select2d'],              // new
+            });                                                               // new
+            window.dispatchEvent(new Event('resize'));                         // new — triggers Plotly autosize after render
+            chartWrapper.style.display = 'block';                             // new
+        } catch (err) {                                                        // new
+            chartWrapper.innerHTML = `<p style="color:salmon">Error loading chart: ${err.message}</p>`; // new
+            chartWrapper.style.display = 'block';                             // new
+        } finally {                                                            // new
+            loadingMsg.style.display = 'none';                                // new
+        }                                                                      // new
+        resetForm();                                                           // new
+    })();                                                                      // new
+    {% endif %}
 
-            if (graphType === 'championshipProgressionGraph') {
-                requiredSelects.push(sprintScoringSelect);
-            }
-            
-            let allFilled = requiredSelects.every(s => s.value);
-            submitButton.disabled = !allFilled;
-        }
-
-        function updateRaceOptions() {
-            const graphType = graphTypeSelect.value;
-            const seasonValue = seasonSelect.value;
-
-            if (graphType === 'championshipProgressionGraph') {
-                sprintScoringDiv.style.display = 'block';
-            } else {
-                sprintScoringDiv.style.display = 'none';
-                sprintScoringSelect.value = '';
-            }
-
-            if (seasonValue) {
-                let endpoint = '/get_races';
-                let label = 'Races';
-                
-                if (graphType === 'qualifyingAverages' || graphType === 'singleQualifyingAverages') {
-                    endpoint = '/get_pairings';
-                    label = 'Driver Pairings';
-                } else if (graphType === 'championshipProgressionGraph') {
-                    endpoint = '/get_systems';
-                    label = 'Scoring Systems';
-                }
-
-                racesLabel.textContent = label;
-
-                fetch(endpoint, {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ season: seasonValue})
-                })
-                .then(response => response.json())
-                .then(data => {
-                    raceSelect.innerHTML = '';
-
-                    data.forEach(opt => {
-                        const option = document.createElement('option');
-                        option.value = opt[0];
-                        option.textContent = opt[1];
-                        raceSelect.append(option);
-                    });
-                    raceSelect.value = '';
-                    checkAllSelected();
-                });
-            } else {
-                let defaultLabel = '--Race--';
-                if (graphType === 'qualifyingAverages' || graphType === 'singleQualifyingAverages') {
-                    defaultLabel = '--Driver Pairings--';
-                    label = 'Driver Pairings';
-                } else if (graphType === 'championshipProgressionGraph') {
-                    defaultLabel = '--Scoring Systems--';
-                    label = 'Scoring Systems';
-                } else {
-                    label = 'Races';
-                }
-                
-                raceSelect.innerHTML = `<option value="">${defaultLabel}</option>`;
-                racesLabel.textContent = label;
-                checkAllSelected();
-            }
-        }
-
-
+    // -----------------------------------------------------------------------
+    // Form helpers — logic unchanged from original
+    // -----------------------------------------------------------------------
+    function resetForm() {
+        graphTypeSelect.value     = '';
+        seasonSelect.value        = '';
+        raceSelect.innerHTML      = '<option value="">--Race--</option>';
+        sprintScoringSelect.value = '';
+        racesLabel.textContent    = 'Races';
+        sprintScoringDiv.style.display = 'none';
         checkAllSelected();
+    }
 
-        [graphTypeSelect, seasonSelect, raceSelect, sprintScoringSelect].forEach(select => {
-            select.addEventListener('change', checkAllSelected);
+    function checkAllSelected() {
+        const graphType = graphTypeSelect.value;
+        let required = [graphTypeSelect, seasonSelect, raceSelect];
+        if (graphType === 'championshipProgressionGraph') {
+            required.push(sprintScoringSelect);
+        }
+        submitButton.disabled = !required.every(s => s.value);
+    }
+
+    function updateRaceOptions() {
+        const graphType   = graphTypeSelect.value;
+        const seasonValue = seasonSelect.value;
+
+        sprintScoringDiv.style.display =
+            graphType === 'championshipProgressionGraph' ? 'block' : 'none';
+        if (graphType !== 'championshipProgressionGraph') {
+            sprintScoringSelect.value = '';
+        }
+
+        if (!seasonValue) {
+            const def = graphType === 'qualifyingAverages' || graphType === 'singleQualifyingAverages'
+                ? '--Driver Pairings--'
+                : graphType === 'championshipProgressionGraph'
+                    ? '--Scoring Systems--'
+                    : '--Race--';
+            racesLabel.textContent = def.replace(/--/g, '').trim();
+            raceSelect.innerHTML   = `<option value="">${def}</option>`;
+            checkAllSelected();
+            return;
+        }
+
+        let endpoint = '/get_races';
+        let label    = 'Races';
+        if (graphType === 'qualifyingAverages' || graphType === 'singleQualifyingAverages') {
+            endpoint = '/get_pairings';
+            label    = 'Driver Pairings';
+        } else if (graphType === 'championshipProgressionGraph') {
+            endpoint = '/get_systems';
+            label    = 'Scoring Systems';
+        }
+        racesLabel.textContent = label;
+
+        fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ season: seasonValue })
+        })
+        .then(r => r.json())
+        .then(data => {
+            raceSelect.innerHTML = '';
+            data.forEach(opt => {
+                const o = document.createElement('option');
+                o.value = opt[0];
+                o.textContent = opt[1];
+                raceSelect.append(o);
+            });
+            raceSelect.value = '';
+            checkAllSelected();
         });
+    }
 
-        graphTypeSelect.addEventListener('change', function() {
-            updateRaceOptions();
-        });
+    checkAllSelected();
 
-        seasonSelect.addEventListener('change', function() {
-            updateRaceOptions();
-        });
-        
-        {% if img_url %}
-            resetForm();
-        {% endif %}
-
-    </script>
+    [graphTypeSelect, seasonSelect, raceSelect, sprintScoringSelect].forEach(s => {
+        s.addEventListener('change', checkAllSelected);
+    });
+    graphTypeSelect.addEventListener('change', updateRaceOptions);
+    seasonSelect.addEventListener('change', updateRaceOptions);
+</script>
 </body>
+</html>
