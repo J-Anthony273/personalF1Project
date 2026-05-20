@@ -16,7 +16,7 @@
         #chartWrapper { display: none; margin-top: 28px; }                     /* new */
         #loadingMsg   { display: none; color: #aaa; font-style: italic; margin-top: 16px; } /* new */
         #plotDiv      { width: 100%; min-height: 800px; }                      /* new — was 500px; matches the taller Plotly heights */
-    </style>                                                                   /* new */
+    </style>                                                                   
 </head>
 <body>
 <div class="container">
@@ -68,7 +68,7 @@
     // -----------------------------------------------------------------------
     // new — fetch Plotly JSON from /plot_data and render the interactive chart
     // -----------------------------------------------------------------------
-    {% if plot_data_url %}                                                     {# new — was: {% if img_url %} #}
+    {% if plot_data_url %}                                                     
     (async () => {                                                             // new
         loadingMsg.style.display  = 'block';                                  // new
         chartWrapper.style.display = 'none';                                  // new

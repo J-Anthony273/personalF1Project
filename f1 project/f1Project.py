@@ -1,3 +1,10 @@
+#General Imports
+import io
+import numpy as np
+import pandas as pd
+from datetime import timedelta
+
+#Website Imports
 import fastf1
 import fastf1.plotting
 import plotly.graph_objects as go                                              
@@ -6,22 +13,17 @@ from flask_wtf import FlaskForm
 from wtforms import SubmitField, SelectField                                     
 from wtforms.validators import DataRequired
 from flask_bootstrap import Bootstrap
-from raceMapping import raceMapping
-import io
-from datetime import timedelta
-from teammateMapping import teammateMapping
-import numpy as np
-import pandas as pd
-from seasonMapping import seasonMapping
-from scoringSystems import scoringSystems, sprintScoringSystems
-from scoringMapping import scoringMapping, sprintScoringMapping
 
+#Personal Data imports
+from data.raceMapping import raceMapping
+from data.teammateMapping import teammateMapping
+from data.seasonMapping import seasonMapping
+from data.scoringSystems import scoringSystems, sprintScoringSystems
+from data.scoringMapping import scoringMapping, sprintScoringMapping
 
-# Races where less than 75% distance was completed so half points were awarded.
-# From 2018-2025 this happened exactly once: 2021 Belgian GP (Spa).
-# The tuple is (season, raceNo) matching the raceMapping numbering.
+#Races where non full points should be used.
 HALF_POINTS_RACES = {
-    (2021, 12),  # 2021 Belgian Grand Prix — 2 laps behind SC, half points awarded
+    (2021, 12),
 }
 
 app = Flask(__name__)
@@ -242,21 +244,23 @@ def qualifyingTimings(season, race):
 def qualifyingAverages(season, pairing):
     try:
         noOfRaces = {2018: 21, 2019: 21, 2020: 17, 2021: 22,
-                     2022: 19, 2023: 22, 2024: 24, 2025: 13}
+                     2022: 19, 2023: 22, 2024: 24, 2025: 24}
         if " - " not in pairing:
             raise ValueError(f"Invalid pairing format: '{pairing}'")
         driverA, driverB = pairing.split(" - ")
         differences, counter = [], 0
         xAxis, yAxis = [], []
 
+        if season == "2025" and driverB == "Andrea Kimi Antonelli":
+            driverB = "Kimi Antonelli"
+
         for raceNo in range(1, noOfRaces[int(season)] + 1):
             event = fastf1.get_event(int(season), int(raceNo))
-            if event["EventFormat"] == "sprint_qualifying":
+            if event["EventFormat"] == "sprint":
                 sprintSession = fastf1.get_session(int(season), int(raceNo), "SQ")
                 sprintSession.load(telemetry=False, weather=False)
                 results = sprintSession.results
-                qualiNames = results['FullName'].tolist()
-                _fix_antonelli(season, raceNo, driverB)                     
+                qualiNames = results['FullName'].tolist()                  
                 if driverA in qualiNames and driverB in qualiNames:
                     if _same_team(results, driverA, driverB):                
                         counter, differences = qualifyingAverageCalculator(
@@ -267,9 +271,10 @@ def qualifyingAverages(season, pairing):
             session = fastf1.get_session(int(season), int(raceNo), "Q")
             session.load(telemetry=False, weather=False)
             results = session.results
+            if season == "2025":
+                results['FullName'] = results['FullName'].str.replace(
+                'Andrea Kimi Antonelli', 'Kimi Antonelli', regex=False)
             qualiNames = results['FullName'].tolist()
-            if season == "2025" and raceNo > 2 and driverB == "Andrea Kimi Antonelli":
-                driverB = "Kimi Antonelli"
             if driverA in qualiNames and driverB in qualiNames:
                 if _same_team(results, driverA, driverB):                   
                     counter, differences = qualifyingAverageCalculator(
@@ -283,7 +288,9 @@ def qualifyingAverages(season, pairing):
         fig.add_trace(go.Bar(                                                  
             x=xAxis,                                                          
             y=yAxis,                                                          
-            marker_color=bar_colors,                                          
+            marker_color=bar_colors,    
+            text=[f"{('+' if v > 0 else '')}{v:.3f}s" for v in yAxis], 
+            textposition='outside',                                      
             hovertemplate=(                                                 
                 'Race #%{x}<br>'                                              
                 'Avg gap: %{y:.3f}s'                                          
@@ -316,21 +323,22 @@ def qualifyingAverages(season, pairing):
 def singleQualifyingAverages(season, pairing):
     try:
         noOfRaces = {2018: 21, 2019: 21, 2020: 17, 2021: 22,
-                     2022: 19, 2023: 22, 2024: 24, 2025: 14}
+                     2022: 19, 2023: 22, 2024: 24, 2025: 24}
         if " - " not in pairing:
             raise ValueError(f"Invalid pairing format: '{pairing}'")
         driverA, driverB = pairing.split(" - ")
         xAxis, yAxis = [], []
 
+        if season == "2025" and driverB == "Andrea Kimi Antonelli":
+            driverB = "Kimi Antonelli"
+
         for raceNo in range(1, noOfRaces[int(season)] + 1):
             event = fastf1.get_event(int(season), int(raceNo))
-            if event["EventFormat"] == "sprint_qualifying":
+            if event["EventFormat"] == "sprint":
                 sprintSession = fastf1.get_session(int(season), int(raceNo), "SQ")
                 sprintSession.load(telemetry=False, weather=False)
                 results = sprintSession.results
                 qualiNames = results['FullName'].tolist()
-                if season == "2025" and raceNo > 2 and driverB == "Andrea Kimi Antonelli":
-                    driverB = "Kimi Antonelli"
                 if driverA in qualiNames and driverB in qualiNames:
                     if _same_team(results, driverA, driverB):                 
                         avg = singleQualifyingAverageCalculator(results, [], driverA, driverB)
@@ -340,6 +348,9 @@ def singleQualifyingAverages(season, pairing):
             session = fastf1.get_session(int(season), int(raceNo), "Q")
             session.load(telemetry=False, weather=False)
             results = session.results
+            if season == "2025":
+                results['FullName'] = results['FullName'].str.replace(
+                'Andrea Kimi Antonelli', 'Kimi Antonelli', regex=False)
             qualiNames = results['FullName'].tolist()
             if season == "2025" and raceNo > 2 and driverB == "Andrea Kimi Antonelli":
                 driverB = "Kimi Antonelli"
@@ -357,7 +368,9 @@ def singleQualifyingAverages(season, pairing):
         fig.add_trace(go.Bar(                                              
             x=xAxis,                                                          
             y=clipped,                                                        
-            marker_color=bar_colors,                                          
+            marker_color=bar_colors,  
+            text=hover_texts,
+            textposition='outside',                                        
             customdata=hover_texts,                                            
             hovertemplate=(                                                   
                 '%{x}<br>'                                                    
@@ -390,7 +403,7 @@ def singleQualifyingAverages(season, pairing):
 def championshipProgression(season, system, sprintsystem=None):
     try:
         noOfRaces = {2018: 21, 2019: 21, 2020: 17, 2021: 22,
-                     2022: 19, 2023: 22, 2024: 24, 2025: 14}
+                     2022: 19, 2023: 22, 2024: 24, 2025: 24}
 
         drivers            = {}
         driversResults     = {}
@@ -412,7 +425,7 @@ def championshipProgression(season, system, sprintsystem=None):
 
         for raceNo in range(1, noOfRaces[int(season)] + 1):
             event = fastf1.get_event(int(season), int(raceNo))
-            if event["EventFormat"] == "sprint_qualifying" and sprint_scoring:
+            if event["EventFormat"] == "sprint" and sprint_scoring:
                 s_type = 'SQ' if int(season) == 2021 else 'S'
                 sp_sess = fastf1.get_session(int(season), raceNo, s_type)
                 sp_sess.load()
@@ -420,6 +433,9 @@ def championshipProgression(season, system, sprintsystem=None):
                     :, ['Abbreviation', 'FirstName', 'LastName', 'ClassifiedPosition']
                 ].copy()
                 sp_results['DriverName'] = sp_results['FirstName'] + ' ' + sp_results['LastName']
+                if int(season) == 2025:
+                    sp_results['DriverName'] = sp_results['DriverName'].str.replace(
+                        'Andrea Kimi Antonelli', 'Kimi Antonelli', regex=False)
                 for _, row in sp_results.iterrows():
                     abb  = row['Abbreviation']
                     name = row['DriverName']
@@ -442,13 +458,21 @@ def championshipProgression(season, system, sprintsystem=None):
                 :, ['Abbreviation', 'FirstName', 'LastName', 'ClassifiedPosition']
             ].copy()
             results['DriverName'] = results['FirstName'] + ' ' + results['LastName']
+            if int(season) == 2025:
+                results['DriverName'] = results['DriverName'].str.replace(
+                    'Andrea Kimi Antonelli', 'Kimi Antonelli', regex=False)
 
-            # Only consider laps from classified finishers with a valid lap time  
-            classified_abbs = results.loc[                                     
-                results['ClassifiedPosition'].apply(                           
-                    lambda x: str(x).isdigit()                                
-                ), 'Abbreviation'                                               
-            ].tolist()                                                         
+            winner_abv = session.results.loc[session.results['Position'] == 1, 'Abbreviation'].iloc[0]
+            winner_laps = session.laps[session.laps['Driver'] == winner_abv]['LapNumber'].max()
+
+            if winner_laps > 0:
+                classification_cutoff = 0.9 * winner_laps
+            else:
+                classification_cutoff = 0
+
+            lap_counts = session.laps.groupby('Driver').size()
+            classified_abbs = lap_counts[lap_counts >= classification_cutoff].index.tolist()
+
             valid_laps = session.laps[                                         
                 session.laps['Driver'].isin(classified_abbs) &                  
                 session.laps['LapTime'].notna() &                               
@@ -459,8 +483,10 @@ def championshipProgression(season, system, sprintsystem=None):
                     valid_laps['LapTime'].idxmin(), 'Driver'                   
                 ]                                                              
             else:                                                              
-                fastest_driver = None                                          
+                fastest_driver = None   
+
             results['GotFastestLap'] = results['Abbreviation'] == fastest_driver  
+
 
             for _, row in results.iterrows():
                 abb    = row['Abbreviation']
@@ -478,7 +504,7 @@ def championshipProgression(season, system, sprintsystem=None):
                 multiplier = 0.5 if (int(season), raceNo) in HALF_POINTS_RACES else 1.0   
                 pts     = scoring.get(pos, 0) * multiplier                   
                 fl_rule = scoring.get("FL", False)
-                if fl_rule:
+                if fl_rule and (int(season), raceNo) not in HALF_POINTS_RACES:
                     if isinstance(fl_rule, bool) and fl_rule and got_fl:
                         pts += 1 * multiplier                                 
                     elif isinstance(fl_rule, int) and got_fl:
@@ -539,7 +565,7 @@ def championshipProgression(season, system, sprintsystem=None):
             fig.add_trace(go.Scatter(                                      
                 x=races,                                                      
                 y=totals,                                                     
-                mode='lines+markers',                                        
+                mode='lines+markers',                                       
                 name=label,                                                   
                 line=dict(color=color, width=2),                              
                 marker=dict(color=color, size=7, symbol='circle',             
@@ -623,11 +649,6 @@ def singleQualifyingAverageCalculator(results, differences, driverA, driverB):
         return 0                                                              
     return sum(differences) / len(differences)
 
-
-# ---------------------------------------------------------------------------
-# FLASK ROUTES
-# ---------------------------------------------------------------------------
-
 @app.route('/', methods=['GET', 'POST'])
 def homePage():
     form = optionForm()
@@ -651,7 +672,8 @@ def homePage():
 
     if request.method == "POST" and graph_type and season_value and race_value: 
         sprint_value  = request.form.get('sprintScoring') if graph_type == "championshipProgressionGraph" else None 
-        plot_data_url = url_for("plot_data",                                   
+        plot_data_url = url_for("plot_data",  
+                                graphType = graph_type,                                 
                                 season=season_value,                          
                                 race=race_value,                              
                                 sprintScoring=sprint_value)                   
