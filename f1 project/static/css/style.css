@@ -1,11 +1,5 @@
-/* ============================================================
-   F1 Plotter — stylesheet
-   Aesthetic: dark carbon-fibre dashboard, F1 red accents
-   ============================================================ */
-
 @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700&family=Barlow:wght@300;400;500&display=swap');
 
-/* ── Reset & tokens ─────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
@@ -33,7 +27,6 @@ html, body {
     line-height: 1.5;
 }
 
-/* ── Carbon fibre body texture ──────────────────────────────── */
 body {
     background-image:
         repeating-linear-gradient(
@@ -52,7 +45,6 @@ body {
         );
 }
 
-/* ── Top control bar ────────────────────────────────────────── */
 #topBar {
     position: sticky;
     top: 0;
@@ -67,7 +59,6 @@ body {
     padding: 0 20px;
 }
 
-/* Red left stripe accent */
 #topBar::before {
     content: '';
     position: absolute;
@@ -76,7 +67,6 @@ body {
     background: var(--red);
 }
 
-/* ── Logo / title ───────────────────────────────────────────── */
 .site-title {
     font-family: var(--font-head);
     font-size: 26px;
@@ -95,7 +85,6 @@ body {
     color: var(--red);
 }
 
-/* ── Form row ───────────────────────────────────────────────── */
 #controlForm {
     display: flex;
     align-items: center;
@@ -105,10 +94,8 @@ body {
     overflow-x: auto;
 }
 
-/* Hide default scrollbar on the form row */
 #controlForm::-webkit-scrollbar { display: none; }
 
-/* ── Label + select groups ──────────────────────────────────── */
 .field-group {
     display: flex;
     flex-direction: column;
@@ -126,7 +113,6 @@ body {
     padding-left: 2px;
 }
 
-/* ── Select inputs ──────────────────────────────────────────── */
 select {
     appearance: none;
     -webkit-appearance: none;
@@ -161,12 +147,10 @@ select option {
     color: var(--text);
 }
 
-/* ── Sprint scoring (conditionally shown) ───────────────────── */
 #sprintScoringDiv {
     flex-shrink: 0;
 }
 
-/* ── Submit button ──────────────────────────────────────────── */
 #submitButton {
     appearance: none;
     -webkit-appearance: none;
@@ -185,7 +169,7 @@ select option {
     transition: background var(--transition), transform var(--transition),
                 box-shadow var(--transition);
     white-space: nowrap;
-    align-self: flex-end;    /* align with inputs */
+    align-self: flex-end;
     margin-bottom: 0;
 }
 
@@ -206,13 +190,11 @@ select option {
     cursor: not-allowed;
 }
 
-/* ── Main content area ──────────────────────────────────────── */
 #mainContent {
     padding: 28px 24px 40px;
     max-width: 100%;
 }
 
-/* ── Loading state ──────────────────────────────────────────── */
 #loadingMsg {
     display: none;
     align-items: center;
@@ -230,7 +212,6 @@ select option {
     display: flex;
 }
 
-/* Racing spinner */
 #loadingMsg::before {
     content: '';
     display: inline-block;
@@ -247,7 +228,6 @@ select option {
     to { transform: rotate(360deg); }
 }
 
-/* ── Chart wrapper ──────────────────────────────────────────── */
 #chartWrapper {
     display: none;
     margin-top: 20px;
@@ -279,7 +259,6 @@ select option {
     color: var(--text);
 }
 
-/* Red line before chart heading */
 .chart-header::before {
     content: '';
     display: block;
@@ -290,7 +269,6 @@ select option {
     flex-shrink: 0;
 }
 
-/* ── Plot div ───────────────────────────────────────────────── */
 #plotDiv {
     width: 100%;
     min-height: 800px;
@@ -300,7 +278,6 @@ select option {
     overflow: hidden;
 }
 
-/* ── Error text ─────────────────────────────────────────────── */
 .chart-error {
     color: #ff6b6b;
     font-family: var(--font-body);
@@ -308,7 +285,6 @@ select option {
     font-size: 14px;
 }
 
-/* ── Responsive adjustments ─────────────────────────────────── */
 @media (max-width: 900px) {
     #topBar {
         height: auto;
