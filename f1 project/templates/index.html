@@ -2,56 +2,55 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>F1 Plotter</title>
 
-    <!-- new — Plotly.js gives us interactive charts with hover & markers -->
-    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>          <!-- new -->
-
-    <!-- new — basic dark styles; your original had none -->
-    <style>                                                                    /* new */
-        body { font-family: sans-serif; background: #111; color: #eee; padding: 20px; } /* new */
-        h1   { margin-bottom: 16px; }                                          /* new */
-        .container { max-width: 98vw; margin: auto; }                         /* new — was 1200px; near-full viewport width */
-        select, button { margin: 6px 0; padding: 6px 10px; font-size: 14px; } /* new */
-        #chartWrapper { display: none; margin-top: 28px; }                     /* new */
-        #loadingMsg   { display: none; color: #aaa; font-style: italic; margin-top: 16px; } /* new */
-        #plotDiv      { width: 100%; min-height: 800px; }                      /* new — was 500px; matches the taller Plotly heights */
-    </style>                                                                   
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
-<div class="container">
-    <h1>Select Plot Options</h1>
-    <form method="POST">
+
+<!-- ── Sticky top control bar ─────────────────────────────────── -->
+<div id="topBar">
+    <div class="site-title">F1 <span>Plotter</span></div>
+
+    <form id="controlForm" method="POST">
         {{ form.hidden_tag() }}
 
-        <div>
-            Graph Type<br>
+        <div class="field-group">
+            <label for="graphType">Graph Type</label>
             {{ form.graphType }}
         </div>
-        <div>
-            Season<br>
+
+        <div class="field-group">
+            <label for="season">Season</label>
             {{ form.season }}
         </div>
-        <div>
-            <span id="racesLabel">Races</span><br>
+
+        <div class="field-group" id="racesGroup">
+            <label for="races" id="racesLabel">Race</label>
             {{ form.races }}
         </div>
-        <div id="sprintScoringDiv" style="display:none;">
-            Sprint Scoring System<br>
+
+        <div class="field-group" id="sprintScoringDiv" style="display:none;">
+            <label for="sprintScoring">Sprint Scoring</label>
             {{ form.sprintScoring }}
         </div>
 
         {{ form.submit(id="submitButton", disabled="disabled") }}
     </form>
+</div>
 
-    <p id="loadingMsg">⏳ Generating chart — this may take a moment…</p>     <!-- new -->
+<!-- ── Main content ────────────────────────────────────────────── -->
+<div id="mainContent">
+    <p id="loadingMsg">Generating chart — this may take a moment…</p>
 
-    <!-- new — replaces the old <img src="{{ img_url }}"> block -->
-    <div id="chartWrapper">                                                    <!-- new -->
-        <hr>                                                                   <!-- new -->
-        <h2>Generated Plot:</h2>                                               <!-- new -->
-        <div id="plotDiv"></div>                                               <!-- new — Plotly renders the interactive chart here -->
-    </div>                                                                     <!-- new -->
+    <div id="chartWrapper">
+        <div class="chart-header">
+            <h2>Generated Plot</h2>
+        </div>
+        <div id="plotDiv"></div>
+    </div>
 </div>
 
 <script>
@@ -62,49 +61,51 @@
     const submitButton        = document.getElementById('submitButton');
     const racesLabel          = document.getElementById('racesLabel');
     const sprintScoringDiv    = document.getElementById('sprintScoringDiv');
-    const loadingMsg          = document.getElementById('loadingMsg');         // new
-    const chartWrapper        = document.getElementById('chartWrapper');       // new
+    const loadingMsg          = document.getElementById('loadingMsg');
+    const chartWrapper        = document.getElementById('chartWrapper');
 
-    // -----------------------------------------------------------------------
-    // new — fetch Plotly JSON from /plot_data and render the interactive chart
-    // -----------------------------------------------------------------------
-    {% if plot_data_url %}                                                     
-    (async () => {                                                             // new
-        loadingMsg.style.display  = 'block';                                  // new
-        chartWrapper.style.display = 'none';                                  // new
-        try {                                                                  // new
-            const resp = await fetch("{{ plot_data_url | safe }}");           // new — | safe prevents Jinja2 escaping & as &amp; in the URL
-            if (!resp.ok) throw new Error(`Server error: ${resp.status}`);    // new
-            const plotlyJson = await resp.json();                              // new
-            // Override layout to fill container width before rendering      // new
-            plotlyJson.layout.width  = undefined;                             // new — let Plotly size to container
-            plotlyJson.layout.autosize = true;                                // new
-            Plotly.react('plotDiv', plotlyJson.data, plotlyJson.layout, {     // new — renders the interactive chart
-                responsive: true,                                             // new
-                displayModeBar: true,                                         // new
-                modeBarButtonsToRemove: ['lasso2d', 'select2d'],              // new
-            });                                                               // new
-            window.dispatchEvent(new Event('resize'));                         // new — triggers Plotly autosize after render
-            chartWrapper.style.display = 'block';                             // new
-        } catch (err) {                                                        // new
-            chartWrapper.innerHTML = `<p style="color:salmon">Error loading chart: ${err.message}</p>`; // new
-            chartWrapper.style.display = 'block';                             // new
-        } finally {                                                            // new
-            loadingMsg.style.display = 'none';                                // new
-        }                                                                      // new
-        resetForm();                                                           // new
-    })();                                                                      // new
+    // ── Fetch Plotly JSON and render chart ─────────────────────
+    {% if plot_data_url %}
+    (async () => {
+        loadingMsg.classList.add('visible');
+        chartWrapper.classList.remove('visible');
+
+        try {
+            const resp = await fetch("{{ plot_data_url | safe }}");
+            if (!resp.ok) throw new Error(`Server error: ${resp.status}`);
+            const plotlyJson = await resp.json();
+
+            plotlyJson.layout.width    = undefined;
+            plotlyJson.layout.autosize = true;
+
+            Plotly.react('plotDiv', plotlyJson.data, plotlyJson.layout, {
+                responsive: true,
+                displayModeBar: true,
+                modeBarButtonsToRemove: ['lasso2d', 'select2d'],
+            });
+
+            window.dispatchEvent(new Event('resize'));
+            chartWrapper.classList.add('visible');
+        } catch (err) {
+            chartWrapper.innerHTML =
+                `<div class="chart-header"><h2>Error</h2></div>` +
+                `<p class="chart-error">${err.message}</p>`;
+            chartWrapper.classList.add('visible');
+        } finally {
+            loadingMsg.classList.remove('visible');
+        }
+
+        resetForm();
+    })();
     {% endif %}
 
-    // -----------------------------------------------------------------------
-    // Form helpers — logic unchanged from original
-    // -----------------------------------------------------------------------
+    // ── Form helpers ────────────────────────────────────────────
     function resetForm() {
         graphTypeSelect.value     = '';
         seasonSelect.value        = '';
         raceSelect.innerHTML      = '<option value="">--Race--</option>';
         sprintScoringSelect.value = '';
-        racesLabel.textContent    = 'Races';
+        racesLabel.textContent    = 'Race';
         sprintScoringDiv.style.display = 'none';
         checkAllSelected();
     }
@@ -123,7 +124,7 @@
         const seasonValue = seasonSelect.value;
 
         sprintScoringDiv.style.display =
-            graphType === 'championshipProgressionGraph' ? 'block' : 'none';
+            graphType === 'championshipProgressionGraph' ? 'flex' : 'none';
         if (graphType !== 'championshipProgressionGraph') {
             sprintScoringSelect.value = '';
         }
@@ -141,13 +142,13 @@
         }
 
         let endpoint = '/get_races';
-        let label    = 'Races';
+        let label    = 'Race';
         if (graphType === 'qualifyingAverages' || graphType === 'singleQualifyingAverages') {
             endpoint = '/get_pairings';
             label    = 'Driver Pairings';
         } else if (graphType === 'championshipProgressionGraph') {
             endpoint = '/get_systems';
-            label    = 'Scoring Systems';
+            label    = 'Scoring System';
         }
         racesLabel.textContent = label;
 

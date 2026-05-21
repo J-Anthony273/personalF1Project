@@ -26,12 +26,14 @@ HALF_POINTS_RACES = {
     (2021, 12),
 }
 
+#Website Setup
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'top secret!'
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///data.sqlite3'
 bootstrap = Bootstrap(app)
 
+#Menus
 class optionForm(FlaskForm):
+    #Graphs
     graphType = SelectField("graphType", choices = [
         ("", "--Graph Type--"),
         ("positionChanges", "Position Changes Graph"),
@@ -41,6 +43,7 @@ class optionForm(FlaskForm):
         ("championshipProgressionGraph", "Championship Progression Graph")
     ], validators = [DataRequired()])
 
+    #Seasons
     season = SelectField("season", choices = [
         ("", "--Season--"),
         ("2018", "2018"),
@@ -53,10 +56,12 @@ class optionForm(FlaskForm):
         ("2025", "2025"),
     ], validators = [DataRequired()])
 
+    #Races
     races = SelectField("races", choices = [
         ("", "--Race--")
     ], validators = [DataRequired()])
 
+    #Sprint Scoring Systems
     sprintScoring = SelectField("sprintScoring", choices = [
         ("", "--Sprint Scoring System--"),
         ("1", "Sprint Scoring System Used in 2021"),
@@ -65,6 +70,7 @@ class optionForm(FlaskForm):
 
     submit = SubmitField("Submit")
 
+#Seconds Converter
 def to_seconds(t):
     if isinstance(t, timedelta):
         return t.total_seconds()
@@ -75,6 +81,7 @@ def to_seconds(t):
         return t
     return None
 
+#Time Formatter
 def format_time(seconds):                                   
     if seconds is None:                             
         return "N/A"                                
@@ -83,8 +90,10 @@ def format_time(seconds):
     return f"{minutes}:{secs:06.3f}"                
 
 
+#Position Change Graphs
 def positionChanges(season, race):
     try:
+        #Sprint or Race
         if race.endswith("S"):
             race = race[:-1]
             session = fastf1.get_session(int(season), int(race), "S")
@@ -94,6 +103,7 @@ def positionChanges(season, race):
 
         fig = go.Figure()                                                     
 
+        #Tracks each drivers position at the end of each lap and plots it
         for drv in session.drivers:
             drv_laps = session.laps.pick_drivers(drv)
             if not drv_laps.empty:
@@ -148,9 +158,10 @@ def positionChanges(season, race):
         print(f"Error in positionChanges: {e}")
         return _error_fig(str(e))                                           
 
-
+#Qualifying Timings Graph
 def qualifyingTimings(season, race):
     try:
+        #Sprint or Race
         if race.endswith("S"):
             newRace = race[:-1]
             session = fastf1.get_session(int(season), int(newRace), "SQ")
@@ -162,6 +173,7 @@ def qualifyingTimings(season, race):
         fig = go.Figure()                                                     
         all_seconds = []                                                      
 
+        #Collects each driver respective Q1, Q2 and Q3 times and creates the graph
         for _, row in results.iterrows():
             abb = row['Abbreviation']
             q1, q2, q3 = row['Q1'], row['Q2'], row['Q3']
@@ -201,7 +213,7 @@ def qualifyingTimings(season, race):
                 )                                                             
             ))                                                                
 
-        # Build readable y-axis tick labels (M:SS.mmm)                       
+        #Makes the Y axis into minutes:seconds:miliseconds                   
         if all_seconds:                                                       
             lo, hi = min(all_seconds) - 0.5, max(all_seconds) + 0.5          
             tick_step = 0.5                                                   
@@ -241,19 +253,25 @@ def qualifyingTimings(season, race):
         return _error_fig(str(e))                                             
 
 
+#Cumulative Qualifying Average Gaps between Teammates Graph
 def qualifyingAverages(season, pairing):
     try:
+        #For the For loop
         noOfRaces = {2018: 21, 2019: 21, 2020: 17, 2021: 22,
                      2022: 19, 2023: 22, 2024: 24, 2025: 24}
+        
+        #Splits the pairs of drivers from teammateMapping
         if " - " not in pairing:
             raise ValueError(f"Invalid pairing format: '{pairing}'")
         driverA, driverB = pairing.split(" - ")
         differences, counter = [], 0
         xAxis, yAxis = [], []
 
+        #FastF1 changes Antonelli Name mid-season so this normalises it
         if season == "2025" and driverB == "Andrea Kimi Antonelli":
             driverB = "Kimi Antonelli"
 
+        #Calculates the average difference in Quali Times up to the current weekend whether or not is a sprint weekend or a race weekend
         for raceNo in range(1, noOfRaces[int(season)] + 1):
             event = fastf1.get_event(int(season), int(raceNo))
             if event["EventFormat"] == "sprint":
@@ -271,10 +289,14 @@ def qualifyingAverages(season, pairing):
             session = fastf1.get_session(int(season), int(raceNo), "Q")
             session.load(telemetry=False, weather=False)
             results = session.results
+
+            #Used as an assurance that antonelli's name has been normalised
             if season == "2025":
                 results['FullName'] = results['FullName'].str.replace(
                 'Andrea Kimi Antonelli', 'Kimi Antonelli', regex=False)
             qualiNames = results['FullName'].tolist()
+
+            #Performs the calulation
             if driverA in qualiNames and driverB in qualiNames:
                 if _same_team(results, driverA, driverB):                   
                     counter, differences = qualifyingAverageCalculator(
@@ -319,19 +341,24 @@ def qualifyingAverages(season, pairing):
         print(f"Error in qualifyingAverages: {e}")
         return _error_fig(str(e))                                             
 
-
+#Singular Qualifying Average Gaps between teammates
 def singleQualifyingAverages(season, pairing):
     try:
+        #For the For loop
         noOfRaces = {2018: 21, 2019: 21, 2020: 17, 2021: 22,
                      2022: 19, 2023: 22, 2024: 24, 2025: 24}
+        
+        #Splits the pairs of drivers from teammateMapping
         if " - " not in pairing:
             raise ValueError(f"Invalid pairing format: '{pairing}'")
         driverA, driverB = pairing.split(" - ")
         xAxis, yAxis = [], []
 
+        #FastF1 changes Antonelli Name mid-season so this normalises it
         if season == "2025" and driverB == "Andrea Kimi Antonelli":
             driverB = "Kimi Antonelli"
 
+        #Calculates the average difference in Quali Times if it is a sprint weekend and then if it is a race weekend
         for raceNo in range(1, noOfRaces[int(season)] + 1):
             event = fastf1.get_event(int(season), int(raceNo))
             if event["EventFormat"] == "sprint":
@@ -348,12 +375,16 @@ def singleQualifyingAverages(season, pairing):
             session = fastf1.get_session(int(season), int(raceNo), "Q")
             session.load(telemetry=False, weather=False)
             results = session.results
+
+            #Used as an assurance that antonelli's name has been normalised
             if season == "2025":
                 results['FullName'] = results['FullName'].str.replace(
                 'Andrea Kimi Antonelli', 'Kimi Antonelli', regex=False)
             qualiNames = results['FullName'].tolist()
             if season == "2025" and raceNo > 2 and driverB == "Andrea Kimi Antonelli":
                 driverB = "Kimi Antonelli"
+
+            #Performs the calulation
             if driverA in qualiNames and driverB in qualiNames:
                 if _same_team(results, driverA, driverB):                    
                     avg = singleQualifyingAverageCalculator(results, [], driverA, driverB)
@@ -405,6 +436,7 @@ def championshipProgression(season, system, sprintsystem=None):
         noOfRaces = {2018: 21, 2019: 21, 2020: 17, 2021: 22,
                      2022: 19, 2023: 22, 2024: 24, 2025: 24}
 
+        #Setup Dictionaries
         drivers            = {}
         driversResults     = {}
         driver_points_prog = {}
@@ -414,6 +446,7 @@ def championshipProgression(season, system, sprintsystem=None):
 
         scoring = dict(scoringSystems)[int(system)]
 
+        #The different sprint systems
         sprint_scoring = None
         if sprintsystem:
             sid = int(sprintsystem)
@@ -423,6 +456,7 @@ def championshipProgression(season, system, sprintsystem=None):
                 sprint_scoring = {"1": 8, "2": 7, "3": 6, "4": 5,
                                   "5": 4, "6": 3, "7": 2, "8": 1}
 
+        #Calculates the number of points a driver should get for the whole weekend based on the system
         for raceNo in range(1, noOfRaces[int(season)] + 1):
             event = fastf1.get_event(int(season), int(raceNo))
             if event["EventFormat"] == "sprint" and sprint_scoring:
@@ -458,6 +492,8 @@ def championshipProgression(season, system, sprintsystem=None):
                 :, ['Abbreviation', 'FirstName', 'LastName', 'ClassifiedPosition']
             ].copy()
             results['DriverName'] = results['FirstName'] + ' ' + results['LastName']
+
+            #Antonelli name normalisation
             if int(season) == 2025:
                 results['DriverName'] = results['DriverName'].str.replace(
                     'Andrea Kimi Antonelli', 'Kimi Antonelli', regex=False)
@@ -465,6 +501,9 @@ def championshipProgression(season, system, sprintsystem=None):
             winner_abv = session.results.loc[session.results['Position'] == 1, 'Abbreviation'].iloc[0]
             winner_laps = session.laps[session.laps['Driver'] == winner_abv]['LapNumber'].max()
 
+            #Performed to fix FastF1 classification issues. 
+            #For example Sergio Peres gets credited with the fastest lap point for the 2021 Azerbaijan GP 
+            #despite Max Verstappen getting the fastest lap and being classified according to F1 but FastF1 considers Max to not be classified
             if winner_laps > 0:
                 classification_cutoff = 0.9 * winner_laps
             else:
@@ -473,6 +512,7 @@ def championshipProgression(season, system, sprintsystem=None):
             lap_counts = session.laps.groupby('Driver').size()
             classified_abbs = lap_counts[lap_counts >= classification_cutoff].index.tolist()
 
+            #Ensures that the fastest lap is credited to a classified driver and one that was not deleted
             valid_laps = session.laps[                                         
                 session.laps['Driver'].isin(classified_abbs) &                  
                 session.laps['LapTime'].notna() &                               
@@ -495,15 +535,21 @@ def championshipProgression(season, system, sprintsystem=None):
                 got_fl = row['GotFastestLap']
 
                 if name not in drivers:
+                    #Adds the driver name if not added
                     drivers[name] = 0
+                    #Every result is added
                     driversResults[name] = []
+                    #Counts the progression for the graph
                     driver_points_prog[abb] = []
+                    #Used for countback to deal with ties
                     driversPositions[abb] = []  
 
-                driversPositions[abb].append(str(pos))  
+                driversPositions[abb].append(str(pos)) 
                 multiplier = 0.5 if (int(season), raceNo) in HALF_POINTS_RACES else 1.0   
                 pts     = scoring.get(pos, 0) * multiplier                   
                 fl_rule = scoring.get("FL", False)
+
+                #Fastest lap rule
                 if fl_rule and (int(season), raceNo) not in HALF_POINTS_RACES:
                     if isinstance(fl_rule, bool) and fl_rule and got_fl:
                         pts += 1 * multiplier                                 
@@ -527,6 +573,7 @@ def championshipProgression(season, system, sprintsystem=None):
 
         final_pts = {abb: totals[-1] for abb, totals in driver_points_prog.items()}
 
+        #Deals with countback if drivers are tied
         def countback_key(item):                                               
             abb, pts = item                                                   
             positions = driversPositions.get(abb, [])                         
@@ -608,8 +655,7 @@ def championshipProgression(season, system, sprintsystem=None):
         print(f"Error in championshipProgression: {e}")
         return _error_fig(str(e))                                             
 
-
-
+#For debug purposes
 def _error_fig(msg):                                                           
     fig = go.Figure()                                                         
     fig.add_annotation(text=f"Error: {msg}", x=0.5, y=0.5,                   
@@ -618,11 +664,13 @@ def _error_fig(msg):
     fig.update_layout(template='plotly_dark', height=400)                     
     return fig.to_json()                                                      
 
+#Determines whether drivers are on the same team
 def _same_team(results, driverA, driverB):                                     
     teamA = results.loc[results['FullName'] == driverA, 'TeamName'].values[0] 
     teamB = results.loc[results['FullName'] == driverB, 'TeamName'].values[0] 
     return teamA == teamB                                                      
 
+#Not used
 def _fix_antonelli(season, raceNo, driverB):                                  
     if season == "2025" and raceNo > 2 and driverB == "Andrea Kimi Antonelli": 
         return "Kimi Antonelli"                                                
@@ -649,15 +697,18 @@ def singleQualifyingAverageCalculator(results, differences, driverA, driverB):
         return 0                                                              
     return sum(differences) / len(differences)
 
+#Main website page
 @app.route('/', methods=['GET', 'POST'])
 def homePage():
     form = optionForm()
     plot_data_url = None                                             
 
+    #Builds the forms
     season_value = request.form.get('season') if request.method == "POST" else None
     graph_type   = request.form.get('graphType') if request.method == "POST" else None
     race_value   = request.form.get('races') if request.method == "POST" else None  
 
+    #Changes what is in the first option based on first form selection
     if season_value:
         if graph_type in ('qualifyingAverages', 'singleQualifyingAverages'):
             race_choices = list(teammateMapping.get(season_value, []))
@@ -670,6 +721,7 @@ def homePage():
             race_choices.insert(0, ("", "--Race--"))
         form.races.choices = race_choices
 
+    #Checks for all and if it is championship progression graph so a sprint scoring method is needed
     if request.method == "POST" and graph_type and season_value and race_value: 
         sprint_value  = request.form.get('sprintScoring') if graph_type == "championshipProgressionGraph" else None 
         plot_data_url = url_for("plot_data",  
@@ -681,6 +733,7 @@ def homePage():
     return render_template("index.html", form=form, plot_data_url=plot_data_url)  
 
 
+#Gets the races from raceMapping
 @app.route('/get_races', methods=['POST'])
 def getRaces():
     seasonValue = request.json.get("season")
@@ -688,6 +741,7 @@ def getRaces():
     raceChoices.insert(0, ("", "--Race--"))
     return jsonify(raceChoices)
 
+#Gets the teammate pairs from teammateMapping
 @app.route('/get_pairings', methods=['POST'])
 def getPairings():
     seasonValue    = request.json.get("season")
@@ -695,6 +749,7 @@ def getPairings():
     pairingChoices.insert(0, ("", "--Driver Pairings--"))
     return jsonify(pairingChoices)
 
+#Gets the scoring systems from scoringSystems and scoring mapping
 @app.route('/get_systems', methods=['POST'])
 def getSystems():
     systemChoices = list(scoringMapping)
@@ -702,9 +757,9 @@ def getSystems():
     return jsonify(systemChoices)
 
 
+#Builds the plots
 @app.route("/plot_data")                                                      
 def plot_data():                                                              
-    """Returns Plotly JSON so the browser can render an interactive chart.""" 
     graphType     = request.args.get("graphType")                             
     season        = request.args.get("season")                                
     race          = request.args.get("race")                                  
