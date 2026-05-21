@@ -75,10 +75,13 @@ The app runs on `http://localhost:5050` by default.
 ---
 
 ## Data Coverage
-Races & sessions - 2018–2025 (via FastF1) 
-Championship Progression - 1950–2025 (historical scoring systems included) 
-Teammate pairings - 2018–2025 (including mid-season changes)
-Sprint races - 2021–2025 
+
+| Data | Coverage |
+|---|---|
+| Races & sessions | 2018–2025 (via FastF1) |
+| Championship Progression | 1961–2025 (historical scoring systems included) |
+| Teammate pairings | 2018–2025 (including mid-season changes) |
+| Sprint races | 2021–2025 |
 
 ### Scoring systems
 
