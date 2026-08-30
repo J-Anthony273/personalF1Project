@@ -3,6 +3,7 @@ import io
 import numpy as np
 import pandas as pd
 from datetime import timedelta
+import os
 
 #Website Imports
 import fastf1
@@ -26,9 +27,13 @@ HALF_POINTS_RACES = {
     (2021, 12),
 }
 
+CACHE_DIR = os.environ.get('FASTF1_CACHE_DIR', 'cache')
+os.makedirs(CACHE_DIR, exist_ok=True)
+fastf1.Cache.enable_cache(CACHE_DIR)
+
 #Website Setup
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'top secret!'
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-key-change-me')
 bootstrap = Bootstrap(app)
 
 #Menus
